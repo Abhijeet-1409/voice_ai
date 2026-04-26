@@ -2,7 +2,7 @@
 
 ## Summary
 
-Intelics Voice AI Agent is a real-time voice agent that handles inbound sales calls via browser. A customer opens the browser, speaks into their mic, and the AI agent responds with natural human-like speech. The entire audio pipeline runs locally — no cloud cost for STT or TTS. Only Gemini is called externally for the LLM reasoning.
+Intelics Voice AI Agent is a real-time voice agent that handles inbound sales calls via browser. A customer opens the browser, speaks into their mic, and the AI agent responds with natural human-like speech. The entire audio pipeline runs locally — no cloud cost for STT, TTS, or RAG. Only Gemini is called externally for LLM reasoning.
 
 ---
 
@@ -20,6 +20,9 @@ Kokoro runs locally (no cloud cost), produces the most human-sounding speech of 
 ### Why Gemini 2.5 Flash instead of GPT-4o
 Fast streaming support, competitive quality, and cost effective for high-volume sales call scenarios.
 
+### Why hybrid RAG for pricing
+The Intelics rate card has 6 sheets covering VMs, Windows VMs, databases, backup, firewall, and object storage. A plain keyword search misses synonyms; a pure embedding search misses exact model names. The hybrid approach runs a keyword category filter first (fast), then embedding search on the filtered subset (accurate). This gives correct pricing context to Gemini every time without sending the entire rate card in every prompt.
+
 ### Why Redis for sessions
 Each customer call is a multi-exchange conversation. State (caller name, exchanges, interest level) must persist across multiple WebSocket messages. Redis is fast, supports TTL (auto-expiry), and is shared across all workers and servers — unlike in-memory Python dicts which break with multiple workers.
 
@@ -30,7 +33,7 @@ Phone number is not always known at call start. Two calls from the same number c
 SQLite is a local file — it cannot handle concurrent writes from multiple workers and is not suitable for production. PostgreSQL is production-ready, scalable, and handles concurrent connections properly.
 
 ### Why Docker
-Ensures Redis and PostgreSQL run identically on every machine without manual installation. docker-compose brings up all three services (app, Redis, PostgreSQL) with a single command.
+Ensures Redis and PostgreSQL run identically on every machine without manual installation. docker-compose brings up all three services (app, Redis, PostgreSQL) with a single command. All models are baked into the image at build time so the container is self-contained.
 
 ---
 
@@ -40,7 +43,7 @@ Ensures Redis and PostgreSQL run identically on every machine without manual ins
 ```
 Browser opens page
     ↓
-JavaScript creates WebSocket connection to server
+JavaScript creates WebSocket connection to server (/ws/new)
     ↓
 Server generates unique session_id (e.g. sess_a3f9b2c1d4e5)
     ↓
@@ -67,11 +70,16 @@ Server converts WebM chunks → 16kHz mono WAV (audio_utils.py)
     ↓
 faster-whisper transcribes WAV → transcript string (stt_service.py)
     ↓
-Gemini 2.5 Flash receives transcript + conversation history
+rag_service.retrieve() runs hybrid search on rate card (rag_service.py)
+    Stage 1: keyword filter detects category from transcript words
+    Stage 2: embedding search finds top 3 semantically closest pricing chunks
+    Returns formatted pricing context string
+    ↓
+Gemini 2.5 Flash receives transcript + conversation history + pricing context
     ↓
 Gemini streams reply sentence by sentence (llm_service.py)
     ↓
-Each sentence → Kokoro generates WAV bytes (tts_service.py)
+Each sentence → Kokoro generates WAV bytes immediately (tts_service.py)
     ↓
 WAV bytes sent immediately over WebSocket to browser
     ↓
@@ -133,7 +141,9 @@ Browser                          Server
 ───────                          ──────
 mic audio chunks    →→→→→→→→    audio_utils  →  stt_service
                                                       ↓
-                                               llm_service (Gemini)
+                                               rag_service (hybrid search on rate card)
+                                                      ↓
+                                               llm_service (Gemini + pricing context)
                                                       ↓
                     ←←←←←←←←    tts_service  ←  sentence stream
 audio plays         ←←←←←←←←    WAV bytes
@@ -155,6 +165,7 @@ WebSocketDisconnect              → Redis → PostgreSQL
 | Browser → Server | `{"type": "audio_chunk", "data": "..."}` | Audio chunk bytes |
 | Browser → Server | `{"type": "audio_end"}` | Customer stopped speaking |
 | Browser → Server | `{"type": "interrupt"}` | Customer is speaking — stop agent |
+| Server → Browser | `{"type": "session_id", "session_id": "..."}` | Sent once at call start |
 | Server → Browser | `{"type": "audio_chunk", "data": "..."}` | TTS audio chunk |
 | Server → Browser | `{"type": "audio_end"}` | Agent finished speaking |
 | Server → Browser | `{"type": "listening"}` | Ready to receive customer audio |
@@ -227,4 +238,4 @@ Fields are updated exchange by exchange as Gemini extracts information from the 
 | redis | redis:7-alpine | 6379 | Session store |
 | postgres | postgres:15-alpine | 5432 | Persistent database |
 
-The `tts_models/` folder is mounted as a Docker volume — not baked into the image. This keeps the image small and fast to rebuild.
+All models (Kokoro TTS, all-MiniLM-L6-v2, faster-whisper) are downloaded **inside the Docker image** during `docker build` — not volume mounted. The rate card Excel is also copied into the image via `COPY ../data /app/data`. This keeps the container fully self-contained and nothing needs to exist on the host machine.

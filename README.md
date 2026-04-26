@@ -1,6 +1,6 @@
 # Intelics Voice AI Agent
 
-A real-time AI voice agent that handles inbound sales calls via browser. Built with FastAPI, WebSocket, faster-whisper STT, Gemini 2.5 Flash LLM, and Kokoro TTS — fully local audio processing with zero cloud cost for speech.
+A real-time AI voice agent that handles inbound sales calls via browser. Built with FastAPI, WebSocket, faster-whisper STT, Gemini 2.5 Flash LLM, and Kokoro TTS — fully local audio processing with zero cloud cost for speech, STT, or RAG.
 
 ---
 
@@ -20,6 +20,7 @@ Browser (Client)
 FastAPI Server
 ─────────────────────────────────────────────────────
   faster-whisper       →  STT — transcribes audio locally (~200ms)
+  RAG pipeline         →  Hybrid keyword + embedding search on rate card Excel
   Gemini 2.5 Flash     →  LLM — streams reply sentence by sentence
   Kokoro TTS           →  TTS — generates audio per sentence (~300ms)
   af_heart (sid=3)     →  Warm friendly female voice
@@ -70,58 +71,61 @@ call ends   →  Redis → PostgreSQL (one write) → Redis cleared
 ## File Structure
 
 ```
-voice_ai/
+voice_ai/                            ← root — config, compose, data, docs only
 │
-├── main.py                           ← FastAPI app + WebSocket endpoint + startup
+├── .env                             ← all secrets and config (never in Docker image)
+├── sample.env                       ← example env file (no real secrets)
+├── docker-compose.yml               ← runs app + Redis + PostgreSQL
 │
-├── .env                              ← all secrets and config
-├── sample.env                        ← example env file (no real secrets)
-├── requirements.txt                  ← all Python dependencies
+├── data/
+│   └── rate_card.xlsx               ← Intelics pricing Excel — 6 sheets
+│                                       copied into image via Dockerfile COPY
 │
-├── Dockerfile                        ← builds FastAPI app image
-├── docker-compose.yml                ← runs app + Redis + PostgreSQL
-├── .dockerignore                     ← excludes unnecessary files from image
+├── docs/
+│   ├── architecture.md              ← system architecture overview
+│   ├── setup.md                     ← installation and setup guide
+│   ├── websocket_protocol.md        ← WebSocket message types and flow
+│   ├── session_management.md        ← Redis session lifecycle
+│   ├── api.md                       ← API endpoints reference
+│   └── rag.md                       ← RAG design, chunk structure, category map
 │
-├── config/
-│   └── settings.py                   ← pydantic settings — loads .env
-│
-├── models/
-│   └── db_models.py                  ← SQLAlchemy Call + Exchange tables
-│
-├── utils/
-│   ├── session_store.py              ← Redis — create/get/update/delete sessions
-│   ├── audio_utils.py                ← WebM bytes → 16kHz mono WAV conversion
-│   └── email_utils.py                ← Gmail SMTP email notification
-│
-├── services/
-│   ├── stt_service.py                ← faster-whisper — transcribe(wav_path)
-│   ├── tts_service.py                ← Kokoro — synthesize(text) → WAV bytes
-│   └── llm_service.py                ← Gemini streaming — stream_reply() → sentence generator
-│
-├── handlers/
-│   └── websocket_handler.py          ← all WebSocket message type handling
-│
-├── static/
-│   └── index.html                    ← browser UI
-│
-├── tts_models/
-│   └── kokoro-en-v0_19/              ← mounted as Docker volume (not baked into image)
-│       ├── model.onnx
-│       ├── voices.bin
-│       ├── tokens.txt
-│       └── espeak-ng-data/
-│
-├── tests/
-│   ├── test_tts.py                   ← generates all 20 Kokoro voice samples
-│   └── test_stt.py                   ← tests STT with a local audio file
-│
-└── docs/
-    ├── architecture.md               ← system architecture overview
-    ├── setup.md                      ← installation and setup guide
-    ├── websocket_protocol.md         ← WebSocket message types and flow
-    ├── session_management.md         ← Redis session lifecycle
-    └── api.md                        ← API endpoints reference
+└── app/                             ← ALL CODE LIVES HERE — copied into Docker image
+    │
+    ├── main.py                      ← FastAPI app + WebSocket endpoint + startup
+    ├── requirements.txt             ← all Python dependencies
+    ├── Dockerfile                   ← builds image — downloads all 3 models inside
+    ├── .dockerignore                ← excludes __pycache__, *.pyc
+    │
+    ├── config/
+    │   └── settings.py              ← pydantic settings — loads .env
+    │
+    ├── models/
+    │   └── db_models.py             ← SQLAlchemy Call + Exchange tables
+    │
+    ├── utils/
+    │   ├── session_store.py         ← Redis — create/get/update/delete sessions
+    │   ├── audio_utils.py           ← WebM bytes → 16kHz mono WAV conversion
+    │   └── email_utils.py           ← Gmail SMTP email notification
+    │
+    ├── services/
+    │   ├── stt_service.py           ← faster-whisper — transcribe(wav_path) → str
+    │   ├── tts_service.py           ← Kokoro — synthesize(text) → WAV bytes
+    │   ├── rag_service.py           ← hybrid RAG — keyword filter + embeddings on rate card
+    │   └── llm_service.py           ← Gemini streaming + RAG context injection
+    │
+    ├── handlers/
+    │   └── websocket_handler.py     ← all WebSocket message type handling
+    │
+    ├── static/
+    │   └── index.html               ← browser UI
+    │
+    └── tests/
+        ├── test_tts.py              ← generates all 20 Kokoro voice samples
+        ├── test_stt.py              ← tests STT with a local audio file
+        └── test_rag.py              ← tests RAG queries across all 6 rate card sheets
 ```
+
+> **Note:** All models (Kokoro TTS, all-MiniLM-L6-v2, faster-whisper) are downloaded **inside the Docker image** during `docker build`. Nothing needs to exist on the host machine.
 
 ---
 
@@ -133,6 +137,8 @@ voice_ai/
 | STT | faster-whisper base.en | Local, ~200ms, no cloud cost |
 | LLM | Gemini 2.5 Flash | Streaming, sentence by sentence |
 | TTS | Kokoro af_heart (sid=3) | Local, warm human voice, ~300ms |
+| RAG | sentence-transformers | Local, ~90MB, no cloud cost |
+| Embedding Model | all-MiniLM-L6-v2 | Semantic search on pricing chunks |
 | Transport | WebSocket | Full duplex, persistent connection |
 | Session Store | Redis | Fast, TTL support, shared across workers |
 | Database | PostgreSQL | Production ready, scalable |
@@ -151,17 +157,11 @@ cd voice_ai
 # 2. Copy env file and fill in your values
 cp sample.env .env
 
-# 3. Download Kokoro TTS model
-cd tts_models
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2
-tar xf kokoro-en-v0_19.tar.bz2
-rm kokoro-en-v0_19.tar.bz2
-cd ..
-
-# 4. Start all services
+# 3. Build and start all services
+#    (models are downloaded automatically inside the image during build)
 docker-compose up --build
 
-# 5. Open browser
+# 4. Open browser
 http://localhost:8000
 ```
 
@@ -181,4 +181,7 @@ python tests/test_tts.py
 
 # Test STT with a local audio file
 python tests/test_stt.py
+
+# Test RAG queries across all 6 rate card sheets
+python tests/test_rag.py
 ```
