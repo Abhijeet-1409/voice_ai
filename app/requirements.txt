@@ -1,40 +1,47 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Intelics Voice AI Agent — Python Dependencies
-# ─────────────────────────────────────────────────────────────────────────────
-
-# ── STT — faster-whisper ──────────────────────────────────────────────────────
-faster-whisper
-
-# ── TTS — Kokoro via sherpa-onnx ──────────────────────────────────────────────
-sherpa-onnx
-soundfile
-numpy
-
-# ── Audio conversion — WebM → WAV ────────────────────────────────────────────
-resampy
-
-# ── API — FastAPI + WebSocket ─────────────────────────────────────────────────
+# Web framework
 fastapi
-uvicorn
-python-multipart
-aiofiles
+uvicorn[standard]
+
+# WebSocket
 websockets
 
-# ── LLM — Gemini 2.5 Flash ───────────────────────────────────────────────────
-google-generativeai
-litellm
+# STT
+faster-whisper
 
-# ── Session Store — Redis ─────────────────────────────────────────────────────
+# LLM
+google-generativeai
+
+# TTS
+sherpa-onnx
+kokoro
+
+# RAG
+sentence-transformers
+openpyxl
+pandas
+numpy
+scikit-learn
+
+# Database
+sqlalchemy
+asyncpg
+alembic
+
+# Session store
 redis
 
-# ── Database — PostgreSQL ─────────────────────────────────────────────────────
-sqlalchemy
-psycopg2-binary
-asyncpg
+# Audio processing
+pydub
+soundfile
 
-# ── Email — Gmail SMTP ────────────────────────────────────────────────────────
-# No extra package needed — smtplib is built into Python
+# Email
+secure-smtplib
 
-# ── Config ────────────────────────────────────────────────────────────────────
+# Config
 pydantic-settings
 python-dotenv
+
+# Utilities
+aiofiles
+python-multipart
+uuid
