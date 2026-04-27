@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Intelics Voice AI</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset & Variables ─────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:           #0a0a0f;
+      --surface:      #111118;
+      --border:       #1e1e2e;
+      --accent:       #7c6aff;
+      --accent-dim:   #3d3580;
+      --accent-glow:  rgba(124, 106, 255, 0.18);
+      --red:          #ff4f6a;
+      --red-dim:      rgba(255, 79, 106, 0.15);
+      --green:        #3dffa0;
+      --green-dim:    rgba(61, 255, 160, 0.12);
+      --text:         #e8e8f0;
+      --text-dim:     #5a5a72;
+      --text-mid:     #9090aa;
+      --mono:         'DM Mono', monospace;
+      --display:      'Syne', sans-serif;
+      --radius:       12px;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 14px;
+      line-height: 1.6;
+      overflow: hidden;
+    }
+
+    /* ── Layout ────────────────────────────────────────────────── */
+    .shell {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      height: 100vh;
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ── Header ────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 0 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      font-family: var(--display);
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--text);
+    }
+
+    .logo span {
+      color: var(--accent);
+    }
+
+    .status-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 6px 12px;
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      transition: all 0.3s ease;
+    }
+
+    .status-pill .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: all 0.3s ease;
+    }
+
+    .status-pill.idle    .dot { background: var(--text-dim); }
+    .status-pill.active  .dot { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 1.5s infinite; }
+    .status-pill.speaking .dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 0.8s infinite; }
+    .status-pill.thinking .dot { background: #ffd166; box-shadow: 0 0 8px #ffd166; animation: pulse 1s infinite; }
+
+    .status-pill.active   { color: var(--green);  border-color: rgba(61,255,160,0.25); }
+    .status-pill.speaking { color: var(--accent);  border-color: rgba(124,106,255,0.3); }
+    .status-pill.thinking { color: #ffd166;         border-color: rgba(255,209,102,0.25); }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.4; }
+    }
+
+    /* ── Conversation ──────────────────────────────────────────── */
+    .conversation {
+      overflow-y: auto;
+      padding: 24px 0;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .conversation::-webkit-scrollbar { width: 4px; }
+    .conversation::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    /* empty state */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 12px;
+      color: var(--text-dim);
+      text-align: center;
+    }
+
+    .empty-state .big-icon {
+      font-size: 40px;
+      opacity: 0.3;
+    }
+
+    .empty-state p {
+      font-size: 13px;
+      max-width: 260px;
+    }
+
+    /* message bubbles */
+    .msg {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      animation: fadeUp 0.25s ease forwards;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg-label {
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: 0 4px;
+    }
+
+    .msg.customer .msg-label { color: var(--green); }
+    .msg.agent    .msg-label { color: var(--accent); }
+
+    .msg-bubble {
+      padding: 12px 16px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      font-size: 13.5px;
+      line-height: 1.65;
+      max-width: 90%;
+      color: var(--text);
+      background: var(--surface);
+    }
+
+    .msg.customer .msg-bubble {
+      border-color: rgba(61,255,160,0.15);
+      background: var(--green-dim);
+      align-self: flex-end;
+    }
+
+    .msg.agent .msg-bubble {
+      border-color: rgba(124,106,255,0.2);
+      background: var(--accent-glow);
+      align-self: flex-start;
+    }
+
+    /* ── Footer / Controls ─────────────────────────────────────── */
+    footer {
+      padding: 20px 0 28px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* visualizer bar */
+    .viz-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 28px;
+    }
+
+    .viz-label {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      min-width: 28px;
+    }
+
+    .bars {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      height: 100%;
+    }
+
+    .bar {
+      width: 3px;
+      border-radius: 2px;
+      background: var(--border);
+      height: 4px;
+      transition: height 0.08s ease, background 0.2s ease;
+    }
+
+    .bar.active {
+      background: var(--accent);
+    }
+
+    /* session info */
+    .session-info {
+      font-size: 11px;
+      color: var(--text-dim);
+      letter-spacing: 0.04em;
+    }
+
+    .session-info span {
+      color: var(--text-mid);
+    }
+
+    /* buttons row */
+    .btn-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      padding: 11px 22px;
+      transition: all 0.2s ease;
+      outline: none;
+    }
+
+    .btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    .btn-start {
+      background: var(--accent);
+      color: #fff;
+      flex: 1;
+    }
+
+    .btn-start:hover:not(:disabled) {
+      background: #9180ff;
+      box-shadow: 0 0 20px rgba(124,106,255,0.4);
+    }
+
+    .btn-end {
+      background: var(--red-dim);
+      color: var(--red);
+      border: 1px solid rgba(255,79,106,0.25);
+      flex: 1;
+    }
+
+    .btn-end:hover:not(:disabled) {
+      background: rgba(255,79,106,0.25);
+    }
+  </style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- Header -->
+  <header>
+    <div class="logo">intelics <span>voice</span></div>
+    <div class="status-pill idle" id="statusPill">
+      <div class="dot"></div>
+      <span id="statusText">Idle</span>
+    </div>
+  </header>
+
+  <!-- Conversation -->
+  <div class="conversation" id="conversation">
+    <div class="empty-state" id="emptyState">
+      <div class="big-icon">🎙</div>
+      <p>Press Start Call to connect to the Intelics sales agent.</p>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <!-- Volume visualizer -->
+    <div class="viz-row">
+      <div class="viz-label">mic</div>
+      <div class="bars" id="bars"></div>
+    </div>
+
+    <!-- Session info -->
+    <div class="session-info" id="sessionInfo">session — <span>not connected</span></div>
+
+    <!-- Buttons -->
+    <div class="btn-row">
+      <button class="btn btn-start" id="btnStart">Start Call</button>
+      <button class="btn btn-end"   id="btnEnd" disabled>End Call</button>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+// ── Constants ────────────────────────────────────────────────────────────────
+const WS_URL           = `ws://${location.host}/ws/new`;
+const CHUNK_INTERVAL   = 250;    // ms — send audio chunk every 250ms
+const SILENCE_TIMEOUT  = 1800;   // ms — stop recording after 1.8s of silence
+const VOLUME_THRESHOLD = 18;     // 0-255 — minimum volume to count as speech
+const BARGE_MUTE_MS    = 300;    // ms — ignore mic after agent starts speaking
+const BARGE_MIN_MS     = 500;    // ms — voice must sustain this long to interrupt
+const NUM_BARS         = 24;     // number of visualizer bars
+
+// ── State ────────────────────────────────────────────────────────────────────
+let ws             = null;
+let sessionId      = null;
+let mediaStream    = null;
+let mediaRecorder  = null;
+let audioCtx       = null;
+let analyser       = null;
+let animFrameId    = null;
+
+let isRecording    = false;
+let isAgentSpeaking = false;
+let agentAudioQueue = [];       // queued WAV byte arrays
+let isPlayingAudio  = false;
+
+let silenceTimer    = null;
+let bargeStartTime  = null;     // when sustained voice started
+let bargeMuteUntil  = 0;        // timestamp — ignore mic until this time
+
+// ── DOM ──────────────────────────────────────────────────────────────────────
+const conversation = document.getElementById('conversation');
+const emptyState   = document.getElementById('emptyState');
+const statusPill   = document.getElementById('statusPill');
+const statusText   = document.getElementById('statusText');
+const sessionInfo  = document.getElementById('sessionInfo');
+const btnStart     = document.getElementById('btnStart');
+const btnEnd       = document.getElementById('btnEnd');
+const barsEl       = document.getElementById('bars');
+
+// ── Build visualizer bars ─────────────────────────────────────────────────────
+for (let i = 0; i < NUM_BARS; i++) {
+  const b = document.createElement('div');
+  b.className = 'bar';
+  barsEl.appendChild(b);
+}
+const bars = Array.from(barsEl.querySelectorAll('.bar'));
+
+// ── Status helpers ────────────────────────────────────────────────────────────
+function setStatus(state, label) {
+  statusPill.className = `status-pill ${state}`;
+  statusText.textContent = label;
+}
+
+// ── Add message to UI ─────────────────────────────────────────────────────────
+function addMessage(role, text) {
+  if (emptyState) emptyState.remove();
+
+  const msg = document.createElement('div');
+  msg.className = `msg ${role}`;
+
+  const label  = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = role === 'customer' ? 'You' : 'Priya';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  bubble.textContent = text;
+
+  msg.appendChild(label);
+  msg.appendChild(bubble);
+  conversation.appendChild(msg);
+  conversation.scrollTop = conversation.scrollHeight;
+}
+
+// ── Start call ────────────────────────────────────────────────────────────────
+btnStart.addEventListener('click', async () => {
+  btnStart.disabled = true;
+
+  try {
+    // Get mic with echo cancellation
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation : true,
+        noiseSuppression : true,
+        autoGainControl  : true,
+      }
+    });
+  } catch (err) {
+    alert('Microphone access denied. Please allow microphone access and try again.');
+    btnStart.disabled = false;
+    return;
+  }
+
+  // Set up Web Audio API for volume monitoring
+  audioCtx  = new AudioContext();
+  analyser  = audioCtx.createAnalyser();
+  analyser.fftSize = 256;
+  const source = audioCtx.createMediaStreamSource(mediaStream);
+  source.connect(analyser);
+
+  // Connect to WebSocket
+  ws = new WebSocket(WS_URL);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    btnEnd.disabled = false;
+    setStatus('active', 'Connected');
+    sessionInfo.innerHTML = `session — <span>connecting...</span>`;
+    startVolumeLoop();
+  };
+
+  ws.onmessage = (event) => handleServerMessage(JSON.parse(event.data));
+
+  ws.onclose = () => {
+    setStatus('idle', 'Idle');
+    btnStart.disabled = false;
+    btnEnd.disabled   = true;
+    stopRecording();
+    stopVolumeLoop();
+  };
+
+  ws.onerror = (err) => {
+    console.error('WebSocket error:', err);
+  };
+});
+
+// ── End call ──────────────────────────────────────────────────────────────────
+btnEnd.addEventListener('click', () => {
+  if (ws) ws.close();
+});
+
+// ── Handle server messages ────────────────────────────────────────────────────
+function handleServerMessage(msg) {
+  switch (msg.type) {
+
+    case 'session_id':
+      sessionId = msg.session_id;
+      sessionInfo.innerHTML = `session — <span>${sessionId}</span>`;
+      break;
+
+    case 'listening':
+      isAgentSpeaking = false;
+      setStatus('active', 'Listening');
+      startRecording();
+      break;
+
+    case 'transcript':
+      addMessage('customer', msg.text);
+      stopRecording();
+      setStatus('thinking', 'Thinking');
+      break;
+
+    case 'audio_chunk':
+      // Decode base64 WAV bytes and queue for playback
+      const binary  = atob(msg.data);
+      const bytes   = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      agentAudioQueue.push(bytes.buffer);
+      if (!isPlayingAudio) playNextChunk();
+      break;
+
+    case 'audio_end':
+      isAgentSpeaking = false;
+      break;
+
+    case 'reply_text':
+      addMessage('agent', msg.text);
+      break;
+  }
+}
+
+// ── Audio recording ───────────────────────────────────────────────────────────
+function startRecording() {
+  if (isRecording || !mediaStream) return;
+  isRecording = true;
+
+  mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
+
+  mediaRecorder.ondataavailable = (e) => {
+    if (e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const base64 = reader.result.split(',')[1];
+        wsSend({ type: 'audio_chunk', data: base64 });
+      };
+      reader.readAsDataURL(e.data);
+    }
+  };
+
+  mediaRecorder.start(CHUNK_INTERVAL);
+  resetSilenceTimer();
+}
+
+function stopRecording() {
+  if (!isRecording) return;
+  isRecording = false;
+  clearTimeout(silenceTimer);
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+  }
+}
+
+function resetSilenceTimer() {
+  clearTimeout(silenceTimer);
+  silenceTimer = setTimeout(() => {
+    if (isRecording) {
+      stopRecording();
+      wsSend({ type: 'audio_end' });
+    }
+  }, SILENCE_TIMEOUT);
+}
+
+// ── Audio playback ────────────────────────────────────────────────────────────
+async function playNextChunk() {
+  if (agentAudioQueue.length === 0) {
+    isPlayingAudio  = false;
+    isAgentSpeaking = false;
+    return;
+  }
+
+  isPlayingAudio  = true;
+  isAgentSpeaking = true;
+  setStatus('speaking', 'Speaking');
+
+  // Set mute window — ignore barge-in for first 300ms
+  bargeMuteUntil = Date.now() + BARGE_MUTE_MS;
+  bargeStartTime = null;
+
+  const buffer = agentAudioQueue.shift();
+
+  try {
+    const decoded = await audioCtx.decodeAudioData(buffer);
+    const source  = audioCtx.createBufferSource();
+    source.buffer = decoded;
+    source.connect(audioCtx.destination);
+    source.onended = () => playNextChunk();
+    source.start();
+  } catch (err) {
+    console.error('Audio decode error:', err);
+    playNextChunk();
+  }
+}
+
+function clearAudioQueue() {
+  agentAudioQueue = [];
+  isPlayingAudio  = false;
+  isAgentSpeaking = false;
+}
+
+// ── Volume monitor + barge-in ─────────────────────────────────────────────────
+function startVolumeLoop() {
+  const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+  function loop() {
+    animFrameId = requestAnimationFrame(loop);
+    analyser.getByteFrequencyData(dataArray);
+
+    // Average volume
+    let sum = 0;
+    for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+    const avg = sum / dataArray.length;
+
+    // Update visualizer bars
+    updateBars(dataArray);
+
+    // Barge-in detection — only when agent is speaking
+    if (isAgentSpeaking) {
+      const now = Date.now();
+
+      // Filter 1 — 300ms mute window at start of playback
+      if (now < bargeMuteUntil) return;
+
+      // Filter 2 — volume threshold
+      if (avg < VOLUME_THRESHOLD) {
+        bargeStartTime = null;
+        return;
+      }
+
+      // Filter 3 — sustained voice for 500ms+
+      if (!bargeStartTime) {
+        bargeStartTime = now;
+        return;
+      }
+
+      if (now - bargeStartTime >= BARGE_MIN_MS) {
+        // All filters passed — trigger barge-in
+        triggerBargeIn();
+      }
+    } else {
+      // Not agent speaking — use volume to extend silence timer
+      if (isRecording && avg > VOLUME_THRESHOLD) {
+        resetSilenceTimer();
+      }
+    }
+  }
+
+  loop();
+}
+
+function stopVolumeLoop() {
+  if (animFrameId) {
+    cancelAnimationFrame(animFrameId);
+    animFrameId = null;
+  }
+}
+
+function updateBars(dataArray) {
+  const step = Math.floor(dataArray.length / NUM_BARS);
+  bars.forEach((bar, i) => {
+    const val    = dataArray[i * step] || 0;
+    const height = Math.max(4, (val / 255) * 28);
+    bar.style.height = `${height}px`;
+    bar.classList.toggle('active', val > VOLUME_THRESHOLD * 2);
+  });
+}
+
+function triggerBargeIn() {
+  bargeStartTime  = null;
+  bargeMuteUntil  = 0;
+  clearAudioQueue();
+  stopRecording();
+  wsSend({ type: 'interrupt' });
+  setStatus('active', 'Listening');
+}
+
+// ── WebSocket send ────────────────────────────────────────────────────────────
+function wsSend(data) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(data));
+  }
+}
+</script>
+</body>
+</html>
