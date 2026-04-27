@@ -1,47 +1,162 @@
-# Web framework
-fastapi
-uvicorn[standard]
+# ==============================================================================
+# INTELICS VOICE AI AGENT — requirements.txt
+# Lives at: app/requirements.txt (inside Docker build context)
+# Installed inside the Docker image via: pip install --no-cache-dir -r requirements.txt
+# ==============================================================================
+# HOW TO READ THIS FILE:
+#   Each package is pinned to a MAJOR.MINOR version (e.g. fastapi==0.111.*)
+#   using ~= (compatible release operator) where possible, or == for exact pins.
+#   This ensures reproducible builds — same packages every docker build.
+# ==============================================================================
 
-# WebSocket
-websockets
 
-# STT
-faster-whisper
+# ------------------------------------------------------------------------------
+# WEB FRAMEWORK & SERVER
+# ------------------------------------------------------------------------------
 
-# LLM
-google-generativeai
+# FastAPI — the async web framework powering our REST and WebSocket endpoints.
+# Used in: main.py (FastAPI app, WebSocket, CORSMiddleware)
+fastapi==0.111.0
 
-# TTS
-sherpa-onnx
-kokoro
+# Uvicorn — ASGI server that runs FastAPI. Needed to actually serve HTTP/WS.
+# The [standard] extra includes: httptools (fast HTTP parser) and uvloop (faster event loop)
+# Used in: Dockerfile CMD — uvicorn main:app ...
+uvicorn[standard]==0.30.1
 
-# RAG
-sentence-transformers
-openpyxl
-pandas
-numpy
-scikit-learn
+# python-multipart — needed by FastAPI to parse multipart form data.
+# FastAPI requires this even if you don't use file uploads directly.
+python-multipart==0.0.9
 
-# Database
-sqlalchemy
-asyncpg
-alembic
+# websockets — low-level WebSocket library used by uvicorn/FastAPI under the hood.
+# FastAPI's WebSocket support depends on this.
+websockets==12.0
 
-# Session store
-redis
 
-# Audio processing
-pydub
-soundfile
+# ------------------------------------------------------------------------------
+# DATABASE — PostgreSQL + SQLAlchemy ORM
+# ------------------------------------------------------------------------------
 
-# Email
-secure-smtplib
+# SQLAlchemy — ORM used in db_models.py to define Call and Exchange tables.
+# We use the sync (non-async) ORM since DB writes only happen at call end.
+# Used in: app/models/db_models.py
+SQLAlchemy==2.0.30
 
-# Config
-pydantic-settings
-python-dotenv
+# psycopg2-binary — PostgreSQL driver. SQLAlchemy needs this to talk to PostgreSQL.
+# "binary" means pre-compiled — no need for pg_config or build tools in the image.
+# Used in: app/models/db_models.py (via DATABASE_URL connection string)
+psycopg2-binary==2.9.9
 
-# Utilities
-aiofiles
-python-multipart
-uuid
+
+# ------------------------------------------------------------------------------
+# SESSION STORE — Redis
+# ------------------------------------------------------------------------------
+
+# redis — Python client for Redis. Used in session_store.py for all session ops.
+# Used in: app/utils/session_store.py
+redis==5.0.4
+
+
+# ------------------------------------------------------------------------------
+# CONFIGURATION — Pydantic Settings
+# ------------------------------------------------------------------------------
+
+# pydantic-settings — reads environment variables and .env files into typed Python objects.
+# Used in: app/config/settings.py (BaseSettings class)
+# NOTE: pydantic v2 is installed as a dependency of FastAPI, pydantic-settings is separate.
+pydantic-settings==2.2.1
+
+
+# ------------------------------------------------------------------------------
+# SPEECH-TO-TEXT — faster-whisper
+# ------------------------------------------------------------------------------
+
+# faster-whisper — local Whisper STT using CTranslate2 backend.
+# Much faster than openai-whisper on CPU. Uses int8 quantization.
+# Used in: app/services/stt_service.py
+# Model "base.en" is downloaded during docker build (pre-warm step in Dockerfile).
+faster-whisper==1.0.3
+
+
+# ------------------------------------------------------------------------------
+# TEXT-TO-SPEECH — Kokoro via sherpa-onnx
+# ------------------------------------------------------------------------------
+
+# sherpa-onnx — the runtime that loads and runs the Kokoro TTS ONNX model.
+# Provides: OfflineTts, OfflineTtsKokoroModelConfig, OfflineTtsConfig
+# Used in: app/services/tts_service.py
+# Model files are downloaded during docker build (wget in Dockerfile).
+sherpa-onnx==1.10.17
+
+
+# ------------------------------------------------------------------------------
+# AUDIO PROCESSING
+# ------------------------------------------------------------------------------
+
+# soundfile — reads audio files into numpy arrays. Used to read WebM/WAV bytes.
+# Used in: app/utils/audio_utils.py
+soundfile==0.12.1
+
+# resampy — resamples audio to a target sample rate (e.g. 44100Hz → 16000Hz).
+# faster-whisper requires 16kHz mono input — resampy handles the conversion.
+# Used in: app/utils/audio_utils.py
+resampy==0.4.3
+
+# pydub — audio format conversion library. Uses ffmpeg under the hood.
+# Used to convert WebM bytes (from browser MediaRecorder) to WAV format.
+# ffmpeg must be installed as a system package (done in Dockerfile).
+# Used in: app/utils/audio_utils.py
+pydub==0.25.1
+
+# numpy — required by soundfile and resampy for array operations.
+# Also used by sherpa-onnx for audio sample arrays.
+numpy==1.26.4
+
+
+# ------------------------------------------------------------------------------
+# RAG PIPELINE — Embeddings
+# ------------------------------------------------------------------------------
+
+# sentence-transformers — loads all-MiniLM-L6-v2 for embedding pricing chunks.
+# Used in: app/services/rag_service.py
+# Model is downloaded during docker build (git clone in Dockerfile).
+sentence-transformers==3.0.1
+
+# scipy — provides cosine_similarity for comparing query vector vs chunk vectors.
+# Used in: app/services/rag_service.py (embedding_search step)
+scipy==1.13.1
+
+# pandas — reads rate_card.xlsx (all 6 sheets) into DataFrames at startup.
+# Used in: app/services/rag_service.py
+pandas==2.2.2
+
+# openpyxl — engine that pandas uses to read .xlsx files.
+# pandas.read_excel() requires this for Excel format support.
+# Used in: app/services/rag_service.py (indirectly, via pandas)
+openpyxl==3.1.3
+
+
+# ------------------------------------------------------------------------------
+# LLM — Google Gemini
+# ------------------------------------------------------------------------------
+
+# google-generativeai — official Google AI SDK for Gemini.
+# We use this directly (NOT CrewAI) because we need streaming sentence-by-sentence output.
+# CrewAI blocks the generator — incompatible with our real-time TTS pipeline.
+# Used in: app/services/llm_service.py
+google-generativeai==0.7.2
+
+
+# ------------------------------------------------------------------------------
+# STANDARD LIBRARY (no install needed — listed here for documentation only)
+# ------------------------------------------------------------------------------
+# smtplib      — Gmail SMTP email sending (app/utils/email_utils.py)
+# email        — MIMEText, MIMEMultipart for email composition
+# uuid         — session_id generation (app/utils/session_store.py)
+# json         — Redis session serialisation/deserialisation
+# io           — BytesIO buffer for in-memory WAV (app/services/tts_service.py)
+# asyncio      — async task management in websocket_handler.py
+# datetime     — timestamps in session and DB records
+# logging      — all service files use Python standard logger
+# os           — path operations (Dockerfile paths like /app/tts_models/...)
+# struct       — WAV header construction in tts_service.py (if building manually)
+# These are all part of Python's standard library — no pip install required.
