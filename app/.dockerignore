@@ -1,0 +1,57 @@
+# ==============================================================================
+# INTELICS VOICE AI AGENT — .dockerignore
+# Lives at: app/.dockerignore (inside the Docker build context folder)
+# ==============================================================================
+# This file tells Docker what to EXCLUDE when copying files into the image.
+# Works exactly like .gitignore but for the "COPY . ." instruction in Dockerfile.
+#
+# Why does this matter?
+#   - Smaller image size (don't ship compiled bytecode into the image)
+#   - Faster builds (Docker doesn't hash excluded files for cache comparison)
+#   - Security (never accidentally copy .env into the image)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Python compiled bytecode
+# Python creates these automatically when it imports modules.
+# They are machine-specific caches — useless inside a container.
+# Including them would add bloat and potentially cause import confusion.
+# ------------------------------------------------------------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ------------------------------------------------------------------------------
+# .env file — CRITICAL SECURITY EXCLUSION
+# The .env file contains real secrets: Gemini API key, Gmail password, DB password.
+# It must NEVER be baked into the Docker image.
+# If it were in the image, anyone who pulls the image would see your secrets.
+# Secrets are injected at runtime via env_file in docker-compose.yml instead.
+# ------------------------------------------------------------------------------
+.env
+
+# ------------------------------------------------------------------------------
+# Test output folders
+# test_tts.py creates test_output_voices/ with 20 WAV files.
+# These are large audio files that have no place in the production image.
+# ------------------------------------------------------------------------------
+tests/test_output_voices/
+*.wav
+
+# ------------------------------------------------------------------------------
+# Common development artifacts
+# Exclude IDE configs, OS files, and other dev-only clutter.
+# ------------------------------------------------------------------------------
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# ------------------------------------------------------------------------------
+# Git metadata
+# The .git folder is only needed for version control — not inside the container.
+# Excluding it keeps the image smaller.
+# ------------------------------------------------------------------------------
+.git/
+.gitignore

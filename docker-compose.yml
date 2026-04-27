@@ -1,0 +1,144 @@
+# ==============================================================================
+# INTELICS VOICE AI AGENT — docker-compose.yml
+# Lives at: voice_ai/ root (NOT inside app/)
+# Starts 3 containers: app, redis, postgres
+#
+# Usage:
+#   docker-compose up --build     (first time or after code/model changes)
+#   docker-compose up -d          (background, after already built)
+#   docker-compose down           (stop containers — PostgreSQL data is SAFE)
+#   docker-compose down -v        (stop + delete volumes — PostgreSQL data DELETED)
+#   docker-compose logs -f app    (tail app container logs)
+# ==============================================================================
+
+version: "3.9"
+
+services:
+
+  # ----------------------------------------------------------------------------
+  # SERVICE 1: app — FastAPI Voice AI Agent
+  # ----------------------------------------------------------------------------
+  app:
+    # Build the image using app/ as the Docker build context.
+    # Docker will look for app/Dockerfile and execute it from app/ folder.
+    # All COPY commands in Dockerfile are relative to app/ as the root.
+    build: ./app
+
+    # Map host port 8000 to container port 8000.
+    # Format: "HOST_PORT:CONTAINER_PORT"
+    # You access the app at http://localhost:8000 from your machine.
+    # Inside the container, uvicorn listens on 0.0.0.0:8000.
+    ports:
+      - "8000:8000"
+
+    # Load environment variables from .env file at voice_ai/ root.
+    # These become environment variables inside the container at runtime.
+    # The .env file is NEVER copied into the image — only injected at run time.
+    # Pydantic BaseSettings reads them automatically.
+    env_file:
+      - .env
+
+    # This container should only start AFTER redis and postgres are running.
+    # Without this, the app might crash on startup trying to connect to Redis/PostgreSQL
+    # before those containers are ready to accept connections.
+    #
+    # NOTE: depends_on only waits for the container to START — not for the service
+    # inside to be READY. For production, add healthchecks. For POC this is fine.
+    depends_on:
+      - redis
+      - postgres
+
+    # Connect this container to the shared internal network.
+    # All services on the same network can reach each other by service name.
+    # app → redis: use hostname "redis" (not localhost or 127.0.0.1)
+    # app → postgres: use hostname "postgres"
+    # This matches the DATABASE_URL and REDIS_HOST values in .env
+    networks:
+      - voice_ai_network
+
+    # Always restart the container if it crashes unexpectedly.
+    # Useful for long-running POC — auto-recovers from transient errors.
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # SERVICE 2: redis — Session Store
+  # ----------------------------------------------------------------------------
+  redis:
+    # Official Redis image, version 7, Alpine Linux base.
+    # Alpine is a tiny Linux distro (~5MB) — keeps the container minimal.
+    image: redis:7-alpine
+
+    # Expose Redis port to host machine so you can connect with redis-cli
+    # or a Redis GUI (like RedisInsight) from your local machine for debugging.
+    # In production, you would NOT expose this externally.
+    ports:
+      - "6379:6379"
+
+    # Connect to shared network so "app" can reach Redis by hostname "redis".
+    networks:
+      - voice_ai_network
+
+    # Redis data is ephemeral by design — sessions have 1-hour TTL anyway.
+    # No volume needed. Restarting Redis clears all sessions (safe for POC).
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------------------
+  # SERVICE 3: postgres — Persistent Call Database
+  # ----------------------------------------------------------------------------
+  postgres:
+    # Official PostgreSQL image, version 15, Alpine Linux base.
+    image: postgres:15-alpine
+
+    # Expose PostgreSQL port to host so you can connect with psql, DBeaver,
+    # TablePlus etc. from your local machine for inspecting call records.
+    ports:
+      - "5432:5432"
+
+    # Environment variables that configure the PostgreSQL instance at first startup.
+    # POSTGRES_PASSWORD — sets the password for the default "postgres" superuser.
+    #   We reference it from .env using ${POSTGRES_PASSWORD} so it's never hardcoded.
+    # POSTGRES_DB — creates this database automatically when container first starts.
+    #   The DATABASE_URL in .env must end with this database name (voice_ai).
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: voice_ai
+
+    # Mount a named volume to persist PostgreSQL data files.
+    # Without this, ALL call records are lost every time the container restarts.
+    # With this:
+    #   docker-compose down       → container stops, volume SURVIVES, data SAFE
+    #   docker-compose up         → container restarts, reads from same volume
+    #   docker-compose down -v    → explicitly deletes volume, data GONE (only if you want)
+    #
+    # The volume "postgres_data" is defined at the bottom of this file.
+    # Docker manages the actual storage location on the host machine.
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    # Connect to shared network so "app" can reach PostgreSQL by hostname "postgres".
+    networks:
+      - voice_ai_network
+
+    restart: unless-stopped
+
+
+# ==============================================================================
+# NETWORKS
+# ==============================================================================
+networks:
+  voice_ai_network:
+    # "bridge" is the default Docker network driver.
+    # Creates an isolated virtual network for these containers.
+    # Containers on this network can reach each other by service name.
+    # Traffic doesn't leave the host machine.
+    driver: bridge
+
+
+# ==============================================================================
+# VOLUMES
+# ==============================================================================
+volumes:
+  # Named volume for PostgreSQL data persistence.
+  # Docker manages this on the host at /var/lib/docker/volumes/voice_ai_postgres_data/
+  # (exact path varies by OS — Docker handles it, you don't need to know where)
+  postgres_data:
