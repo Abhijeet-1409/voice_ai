@@ -85,7 +85,7 @@ faster-whisper==1.0.3
 # Provides: OfflineTts, OfflineTtsKokoroModelConfig, OfflineTtsConfig
 # Used in: app/services/tts_service.py
 # Model files are downloaded during docker build (wget in Dockerfile).
-sherpa-onnx==1.10.17
+sherpa-onnx==1.13.0
 
 
 # ------------------------------------------------------------------------------
@@ -116,7 +116,16 @@ numpy==1.26.4
 # RAG PIPELINE — Embeddings
 # ------------------------------------------------------------------------------
 
+# torch (CPU-only) — installed BEFORE sentence-transformers so pip does not
+# pull the default GPU build (~530MB). The CPU wheel is ~180MB.
+# We have no GPU in this stack — everything runs on CPU via ONNX/CTranslate2.
+# The extra index URL tells pip where to find the +cpu variant.
+# --extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.3.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+
 # sentence-transformers — loads all-MiniLM-L6-v2 for embedding pricing chunks.
+# Depends on torch — by pinning the CPU wheel above, we ensure it uses that
+# instead of downloading the 530MB GPU build.
 # Used in: app/services/rag_service.py
 # Model is downloaded during docker build (git clone in Dockerfile).
 sentence-transformers==3.0.1

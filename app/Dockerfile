@@ -38,6 +38,7 @@ RUN apt-get update && apt-get install -y \
     git-lfs \
     ffmpeg \
     espeak-ng \
+    bzip2 \
     && rm -rf /var/lib/apt/lists/*
 
 # ------------------------------------------------------------------------------
@@ -47,6 +48,12 @@ RUN apt-get update && apt-get install -y \
 # Docker reuses the cached pip install layer → much faster rebuilds.
 # If we copied all code first, every code change would re-trigger pip install.
 # ------------------------------------------------------------------------------
+# Step 1: Install CPU-only torch FIRST from PyTorch's own index
+# This prevents sentence-transformers from pulling the 530MB GPU build from PyPI
+RUN pip install --no-cache-dir \
+    torch==2.3.0+cpu \
+    --index-url https://download.pytorch.org/whl/cpu
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -113,7 +120,7 @@ RUN python -c "from faster_whisper import WhisperModel; \
 # If prices change → update rate_card.xlsx → rebuild the image.
 # This is intentional: pricing is baked in, not a live mount.
 # ------------------------------------------------------------------------------
-COPY ../data /app/data
+
 
 # ------------------------------------------------------------------------------
 # APPLICATION CODE

@@ -23,6 +23,8 @@ services:
     # Docker will look for app/Dockerfile and execute it from app/ folder.
     # All COPY commands in Dockerfile are relative to app/ as the root.
     build: ./app
+    volumes:
+      - ./data:/app/data
 
     # Map host port 8000 to container port 8000.
     # Format: "HOST_PORT:CONTAINER_PORT"
