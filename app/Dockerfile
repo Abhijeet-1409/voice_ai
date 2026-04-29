@@ -77,8 +77,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 #
 # stt_service.py loads: WhisperModel("base.en", device="cpu", compute_type="int8")
 # ------------------------------------------------------------------------------
-RUN python -c "from faster_whisper import WhisperModel; \
-    WhisperModel('base.en', device='cpu', compute_type='int8')"
+ENV CURL_CA_BUNDLE=""
+ENV REQUESTS_CA_BUNDLE=""
+ENV HF_HUB_DISABLE_SSL_VERIFICATION=1
+
+RUN python -c "from faster_whisper import WhisperModel; WhisperModel('base.en', device='cpu', compute_type='int8')"
 
 # ------------------------------------------------------------------------------
 # APPLICATION CODE
