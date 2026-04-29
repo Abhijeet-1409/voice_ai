@@ -11,6 +11,7 @@ _model = WhisperModel(
     "base.en",
     device="cpu",
     compute_type="int8",
+    local_files_only=True
 )
 
 print("[stt_service] Model ready.")
