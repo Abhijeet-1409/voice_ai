@@ -3,8 +3,21 @@
 # Lives at: voice_ai/ root (NOT inside app/)
 # Starts 3 containers: app, redis, postgres
 #
+# Models are mounted from your host machine — NOT baked into the image.
+# Download them once manually before running:
+#
+#   Kokoro TTS:
+#     cd voice_ai/tts_models
+#     wget https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-en-v0_19.tar.bz2
+#     tar xf kokoro-en-v0_19.tar.bz2 && rm kokoro-en-v0_19.tar.bz2
+#
+#   all-MiniLM-L6-v2 (RAG embedding model):
+#     cd voice_ai/rag_models
+#     git lfs install
+#     git clone https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2
+#
 # Usage:
-#   docker-compose up --build     (first time or after code/model changes)
+#   docker-compose up --build     (first time or after code changes)
 #   docker-compose up -d          (background, after already built)
 #   docker-compose down           (stop containers — PostgreSQL data is SAFE)
 #   docker-compose down -v        (stop + delete volumes — PostgreSQL data DELETED)
@@ -23,43 +36,53 @@ services:
     # Docker will look for app/Dockerfile and execute it from app/ folder.
     # All COPY commands in Dockerfile are relative to app/ as the root.
     build: ./app
-    volumes:
-      - ./data:/app/data
 
-    # Map host port 8000 to container port 8000.
-    # Format: "HOST_PORT:CONTAINER_PORT"
-    # You access the app at http://localhost:8000 from your machine.
-    # Inside the container, uvicorn listens on 0.0.0.0:8000.
     ports:
       - "8000:8000"
 
     # Load environment variables from .env file at voice_ai/ root.
     # These become environment variables inside the container at runtime.
-    # The .env file is NEVER copied into the image — only injected at run time.
+    # The .env file is NEVER copied into the image — only injected at runtime.
     # Pydantic BaseSettings reads them automatically.
     env_file:
       - .env
 
+    volumes:
+      # Kokoro TTS model — downloaded once on your machine, read-only in container
+      # voice_ai/tts_models/ on host → /app/tts_models/ in container
+      # tts_service.py reads from /app/tts_models/kokoro-en-v0_19/
+      - ./tts_models:/app/tts_models:ro
+
+      # RAG embedding model — downloaded once on your machine, read-only in container
+      # voice_ai/rag_models/ on host → /app/rag_models/ in container
+      # rag_service.py loads SentenceTransformer from /app/rag_models/all-MiniLM-L6-v2/
+      - ./rag_models:/app/rag_models:ro
+
+      # Intelics rate card Excel — all 6 pricing sheets, read-only in container
+      # voice_ai/data/ on host → /app/data/ in container
+      # rag_service.py reads /app/data/rate_card.xlsx at startup
+      # To update prices: edit rate_card.xlsx → restart container (no rebuild needed)
+      - ./data:/app/data:ro
+
     # This container should only start AFTER redis and postgres are running.
-    # Without this, the app might crash on startup trying to connect to Redis/PostgreSQL
-    # before those containers are ready to accept connections.
+    # Without this, the app might crash on startup trying to connect to
+    # Redis/PostgreSQL before those containers are ready to accept connections.
     #
-    # NOTE: depends_on only waits for the container to START — not for the service
-    # inside to be READY. For production, add healthchecks. For POC this is fine.
+    # NOTE: depends_on only waits for the container to START — not for the
+    # service inside to be READY. For production, add healthchecks. POC is fine.
     depends_on:
       - redis
       - postgres
 
     # Connect this container to the shared internal network.
     # All services on the same network can reach each other by service name.
-    # app → redis: use hostname "redis" (not localhost or 127.0.0.1)
-    # app → postgres: use hostname "postgres"
-    # This matches the DATABASE_URL and REDIS_HOST values in .env
+    # app → redis:    use hostname "redis"    (not localhost)
+    # app → postgres: use hostname "postgres" (not localhost)
+    # This matches REDIS_HOST=redis and DATABASE_URL=...@postgres... in .env
     networks:
       - voice_ai_network
 
     # Always restart the container if it crashes unexpectedly.
-    # Useful for long-running POC — auto-recovers from transient errors.
     restart: unless-stopped
 
   # ----------------------------------------------------------------------------
@@ -72,11 +95,9 @@ services:
 
     # Expose Redis port to host machine so you can connect with redis-cli
     # or a Redis GUI (like RedisInsight) from your local machine for debugging.
-    # In production, you would NOT expose this externally.
     ports:
       - "6379:6379"
 
-    # Connect to shared network so "app" can reach Redis by hostname "redis".
     networks:
       - voice_ai_network
 
@@ -96,28 +117,29 @@ services:
     ports:
       - "5432:5432"
 
-    # Environment variables that configure the PostgreSQL instance at first startup.
-    # POSTGRES_PASSWORD — sets the password for the default "postgres" superuser.
-    #   We reference it from .env using ${POSTGRES_PASSWORD} so it's never hardcoded.
-    # POSTGRES_DB — creates this database automatically when container first starts.
+    # Environment variables that configure PostgreSQL at first startup.
+    # POSTGRES_PASSWORD — sets password for the default "postgres" superuser.
+    #   Referenced from .env using ${POSTGRES_PASSWORD} — never hardcoded.
+    # POSTGRES_DB — creates this database automatically on first start.
     #   The DATABASE_URL in .env must end with this database name (voice_ai).
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: voice_ai
 
-    # Mount a named volume to persist PostgreSQL data files.
+    # Named volume to persist PostgreSQL data files.
     # Without this, ALL call records are lost every time the container restarts.
     # With this:
-    #   docker-compose down       → container stops, volume SURVIVES, data SAFE
-    #   docker-compose up         → container restarts, reads from same volume
-    #   docker-compose down -v    → explicitly deletes volume, data GONE (only if you want)
+    #   docker-compose down    → container stops, volume SURVIVES, data SAFE
+    #   docker-compose up      → container restarts, reads from same volume
+    #   docker-compose down -v → explicitly deletes volume, data GONE
     #
-    # The volume "postgres_data" is defined at the bottom of this file.
-    # Docker manages the actual storage location on the host machine.
+    # This is a NAMED VOLUME (managed by Docker) — different from the bind mounts
+    # above (./tts_models, ./rag_models, ./data) which point to your actual folders.
+    # Docker stores it at: /var/lib/docker/volumes/voice_ai_postgres_data/
+    # You never need to touch this folder directly.
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
-    # Connect to shared network so "app" can reach PostgreSQL by hostname "postgres".
     networks:
       - voice_ai_network
 
@@ -130,9 +152,9 @@ services:
 networks:
   voice_ai_network:
     # "bridge" is the default Docker network driver.
-    # Creates an isolated virtual network for these containers.
-    # Containers on this network can reach each other by service name.
-    # Traffic doesn't leave the host machine.
+    # Creates an isolated virtual network for these 3 containers.
+    # Containers on this network reach each other by service name.
+    # Traffic stays inside the host machine — not exposed externally.
     driver: bridge
 
 
@@ -141,6 +163,7 @@ networks:
 # ==============================================================================
 volumes:
   # Named volume for PostgreSQL data persistence.
-  # Docker manages this on the host at /var/lib/docker/volumes/voice_ai_postgres_data/
-  # (exact path varies by OS — Docker handles it, you don't need to know where)
+  # Docker manages storage at: /var/lib/docker/volumes/voice_ai_postgres_data/
+  # Only postgres_data is a named volume — tts_models, rag_models, data
+  # are bind mounts (real folders on your machine) defined under app: volumes above.
   postgres_data:
