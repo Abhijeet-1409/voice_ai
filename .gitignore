@@ -53,3 +53,7 @@ Thumbs.db
 # ── Excel Files ────────────────────────────────────────────────────────────────
 *.xlsx
 *.xls
+
+# Models — too large for git, downloaded manually on each machine
+tts_models/
+rag_models/
