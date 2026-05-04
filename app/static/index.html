@@ -509,20 +509,27 @@ function startRecording() {
   if (isRecording || !mediaStream) return;
   isRecording = true;
 
-  mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm' });
+  const chunks = [];  // ← collect all chunks locally
+
+  mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm;codecs=opus' });
 
   mediaRecorder.ondataavailable = (e) => {
-    if (e.data.size > 0 && ws && ws.readyState === WebSocket.OPEN) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = reader.result.split(',')[1];
-        wsSend({ type: 'audio_chunk', data: base64 });
-      };
-      reader.readAsDataURL(e.data);
-    }
+    if (e.data.size > 0) chunks.push(e.data);  // ← just collect, don't send yet
   };
 
-  mediaRecorder.start(CHUNK_INTERVAL);
+  mediaRecorder.onstop = () => {
+    // ← send complete WebM blob ONCE when recording stops
+    const blob = new Blob(chunks, { type: 'audio/webm;codecs=opus' });
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result.split(',')[1];
+      wsSend({ type: 'audio_chunk', data: base64 });
+      wsSend({ type: 'audio_end' });
+    };
+    reader.readAsDataURL(blob);
+  };
+
+  mediaRecorder.start();  // ← no timeslice
   resetSilenceTimer();
 }
 
