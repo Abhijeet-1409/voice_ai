@@ -10,7 +10,7 @@ from services.rag_service import retrieve
 
 genai.configure(api_key=settings.gemini_api_key)
 
-_model = genai.GenerativeModel("gemini-2.5-flash")
+_model = genai.GenerativeModel(settings.gemini_model)
 
 print("[llm_service] Gemini model ready.")
 

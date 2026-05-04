@@ -4,6 +4,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # ── LLM ───────────────────────────────────────────────────────────────────
     gemini_api_key: str
+    gemini_model: str = "gemini-2.5-flash"
 
     # ── Email ─────────────────────────────────────────────────────────────────
     gmail_address: str
