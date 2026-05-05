@@ -1,77 +1,99 @@
-import io
+"""
+tts_service.py — Text-to-Speech using Cartesia Sonic SDK WebSocket
 
-import numpy as np
-import sherpa_onnx
-import soundfile as sf
+One CartesiaTTS instance is created per active call in websocket_handler.py.
+The WebSocket connection to Cartesia opens when the call starts and closes
+when the call ends — giving full isolation between concurrent callers.
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+Each call to synthesize() creates a new context on the same connection,
+streams audio chunks back as raw bytes, and closes the context when done.
+"""
 
-VOICE_SID   = 3      # af_heart — warm friendly female voice
-VOICE_SPEED = 1.0    # normal speaking speed
-MAX_CHARS   = 800    # max characters per synthesis call
+from typing import AsyncGenerator
 
-TTS_MODEL_DIR = "/app/tts_models/kokoro-en-v0_19"
+from cartesia import AsyncCartesia
 
+from config.settings import settings
 
-# ── Model loads ONCE at import time ───────────────────────────────────────────
-
-print("[tts_service] Loading Kokoro TTS model...")
-
-_tts = sherpa_onnx.OfflineTts(
-    sherpa_onnx.OfflineTtsConfig(
-        model=sherpa_onnx.OfflineTtsModelConfig(
-            kokoro=sherpa_onnx.OfflineTtsKokoroModelConfig(
-                model    = f"{TTS_MODEL_DIR}/model.onnx",
-                voices   = f"{TTS_MODEL_DIR}/voices.bin",
-                tokens   = f"{TTS_MODEL_DIR}/tokens.txt",
-                data_dir = f"{TTS_MODEL_DIR}/espeak-ng-data",
-            ),
-            num_threads=2,
-        ),
-        rule_fsts="",
-    )
-)
-
-print("[tts_service] Model ready.")
+TTS_MODEL = "sonic-2"
+VOICE_ID  = "a0e99841-438c-4a64-b679-ae501e7d6091"   # override via settings if needed
 
 
-# ── Synthesize ────────────────────────────────────────────────────────────────
-
-def synthesize(text: str) -> bytes:
+class CartesiaTTS:
     """
-    Convert text to WAV audio bytes using Kokoro TTS.
+    Per-call Cartesia Sonic TTS client.
 
-    Args:
-        text: Sentence to synthesize. Trimmed to MAX_CHARS if needed.
-
-    Returns:
-        WAV audio as raw bytes ready to send over WebSocket.
-        Returns empty bytes if synthesis fails.
+    Lifecycle (managed by websocket_handler.py):
+        tts = CartesiaTTS()
+        await tts.connect()          # call once when call starts
+        ...
+        async for chunk in tts.synthesize(sentence):
+            send_to_browser(chunk)   # called once per sentence
+        ...
+        await tts.close()            # call once when call ends
     """
-    if not text or not text.strip():
-        return b""
 
-    # Trim to max chars to avoid very long synthesis calls
-    text = text.strip()[:MAX_CHARS]
+    def __init__(self):
+        self._client = AsyncCartesia(api_key=settings.cartesia_api_key)
+        self._ws     = None
 
-    try:
-        # Generate audio samples — returns a sherpa_onnx.GeneratedAudio object
-        audio = _tts.generate(
-            text,
-            sid=VOICE_SID,
-            speed=VOICE_SPEED,
-        )
+    async def connect(self) -> None:
+        """Open the Cartesia Sonic WebSocket connection for this call."""
+        self._ws = await self._client.tts.websocket()
+        print("[tts_service] Cartesia Sonic WebSocket connected")
 
-        # Convert samples to float32 numpy array
-        samples = np.array(audio.samples, dtype=np.float32)
+    async def synthesize(self, text: str) -> AsyncGenerator[bytes, None]:
+        """
+        Stream TTS audio for one sentence.
 
-        # Write to in-memory WAV buffer — no disk write needed
-        buffer = io.BytesIO()
-        sf.write(buffer, samples, audio.sample_rate, format="WAV", subtype="PCM_16")
-        buffer.seek(0)
+        Creates a new context per sentence so each sentence is independent.
+        Yields raw PCM bytes (pcm_s16le, 16kHz mono) as they arrive.
+        Cancellation-safe — if the task is cancelled mid-stream, the
+        async generator simply stops yielding.
 
-        return buffer.read()
+        Args:
+            text: Sentence to synthesize (from LLM sentence stream)
 
-    except Exception as e:
-        print(f"[tts_service] Synthesis failed: {e}")
-        return b""
+        Yields:
+            Raw PCM audio bytes ready to base64-encode and send to browser
+        """
+        if not text or not text.strip():
+            return
+
+        if self._ws is None:
+            print("[tts_service] synthesize() called before connect()")
+            return
+
+        try:
+            ctx = self._ws.context(
+                model_id=TTS_MODEL,
+                voice={
+                    "mode": "id",
+                    "id":   settings.cartesia_voice_id or VOICE_ID,
+                },
+                output_format={
+                    "container":   "raw",
+                    "encoding":    "pcm_s16le",
+                    "sample_rate": 16000,
+                },
+            )
+
+            await ctx.send(text.strip())
+            await ctx.no_more_inputs()
+
+            async for response in ctx.receive():
+                if response.type == "chunk" and response.audio:
+                    yield response.audio
+
+        except Exception as e:
+            print(f"[tts_service] Synthesis error: {e}")
+
+    async def close(self) -> None:
+        """Close the Cartesia Sonic WebSocket and the underlying HTTP client."""
+        try:
+            if self._ws:
+                await self._ws.close()
+            await self._client.close()
+            print("[tts_service] Cartesia Sonic WebSocket closed")
+        except Exception as e:
+            print(f"[tts_service] Close error: {e}")

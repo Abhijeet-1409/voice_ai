@@ -31,6 +31,9 @@ python-multipart==0.0.9
 # FastAPI's WebSocket support depends on this.
 websockets==12.0
 
+# ── Cartesia STT + TTS ────────────────────────────────────────────────────────
+cartesia[websockets]>=1.0.0
+httpx>=0.27.0                    # used by cartesia SDK + stt_service REST call
 
 # ------------------------------------------------------------------------------
 # DATABASE — PostgreSQL + SQLAlchemy ORM
@@ -67,28 +70,6 @@ pydantic-settings==2.2.1
 
 
 # ------------------------------------------------------------------------------
-# SPEECH-TO-TEXT — faster-whisper
-# ------------------------------------------------------------------------------
-
-# faster-whisper — local Whisper STT using CTranslate2 backend.
-# Much faster than openai-whisper on CPU. Uses int8 quantization.
-# Used in: app/services/stt_service.py
-# Model "base.en" is downloaded during docker build (pre-warm step in Dockerfile).
-faster-whisper==1.0.3
-
-
-# ------------------------------------------------------------------------------
-# TEXT-TO-SPEECH — Kokoro via sherpa-onnx
-# ------------------------------------------------------------------------------
-
-# sherpa-onnx — the runtime that loads and runs the Kokoro TTS ONNX model.
-# Provides: OfflineTts, OfflineTtsKokoroModelConfig, OfflineTtsConfig
-# Used in: app/services/tts_service.py
-# Model files are downloaded during docker build (wget in Dockerfile).
-sherpa-onnx==1.13.0
-
-
-# ------------------------------------------------------------------------------
 # AUDIO PROCESSING
 # ------------------------------------------------------------------------------
 
@@ -116,12 +97,6 @@ numpy==1.26.4
 # RAG PIPELINE — Embeddings
 # ------------------------------------------------------------------------------
 
-# torch (CPU-only) — installed BEFORE sentence-transformers so pip does not
-# pull the default GPU build (~530MB). The CPU wheel is ~180MB.
-# We have no GPU in this stack — everything runs on CPU via ONNX/CTranslate2.
-# The extra index URL tells pip where to find the +cpu variant.
-# --extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.3.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
 
 # sentence-transformers — loads all-MiniLM-L6-v2 for embedding pricing chunks.
 # Depends on torch — by pinning the CPU wheel above, we ensure it uses that

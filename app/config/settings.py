@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     database_url: str
     postgres_password: str
 
+    # ── Cartesia ──────────────────────────────────────────────────────────────
+    cartesia_api_key: str 
+    cartesia_voice_id: str 
+
     # ── App ───────────────────────────────────────────────────────────────────
     app_port: int = 8000
 
