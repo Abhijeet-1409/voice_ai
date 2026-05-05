@@ -2,16 +2,18 @@ import os
 import subprocess
 import tempfile
 
+from utils.logger import audio_logger
+
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-TARGET_SR = 16000   # faster-whisper requires 16kHz
+TARGET_SR = 16000   # Cartesia STT requires 16kHz
 TARGET_CH = 1       # mono
 
 
 # ── Main function ─────────────────────────────────────────────────────────────
 
-def webm_to_wav(webm_bytes: bytes) -> str:
+def webm_to_wav(webm_bytes: bytes, session_id: str) -> str:
     """
     Convert raw WebM audio bytes from browser into a 16kHz mono WAV file.
     Returns the path to the temp WAV file.
@@ -23,6 +25,8 @@ def webm_to_wav(webm_bytes: bytes) -> str:
       which is what the browser MediaRecorder sends.
       ffmpeg handles every format the browser can produce.
     """
+
+    audio_logger.debug(f"[{session_id}] Converting WebM to WAV ({len(webm_bytes)} bytes)")
 
     # Step 1 — write WebM bytes to a temp file so ffmpeg can read it
     with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp_webm:
@@ -39,7 +43,7 @@ def webm_to_wav(webm_bytes: bytes) -> str:
         # ffmpeg flags explained:
         #   -y              overwrite output file if it exists (temp file was just created)
         #   -i webm_path    input file (the WebM from the browser)
-        #   -ar 16000       set output audio sample rate to 16000 Hz (Whisper requirement)
+        #   -ar 16000       set output audio sample rate to 16000 Hz
         #   -ac 1           set output to 1 channel (mono)
         #   -f wav          force output format to WAV
         #   wav_path        output file path
@@ -47,7 +51,7 @@ def webm_to_wav(webm_bytes: bytes) -> str:
         # stdout and stderr are captured so ffmpeg output doesn't pollute app logs.
         # If ffmpeg fails, CalledProcessError is raised with the full error message.
 
-        result = subprocess.run(
+        subprocess.run(
             [
                 "ffmpeg",
                 "-y",
@@ -62,15 +66,18 @@ def webm_to_wav(webm_bytes: bytes) -> str:
             check=True,         # raises CalledProcessError if ffmpeg exits non-zero
         )
 
+        audio_logger.debug(f"[{session_id}] WebM → WAV conversion complete: {wav_path}")
         return wav_path
 
     except subprocess.CalledProcessError as e:
         # ffmpeg failed — clean up the empty WAV file and re-raise with context
         if os.path.exists(wav_path):
             os.unlink(wav_path)
+        error_msg = e.stderr.decode(errors="replace")
+        audio_logger.error(f"[{session_id}] ffmpeg conversion failed: {error_msg}")
         raise RuntimeError(
             f"ffmpeg failed to convert WebM to WAV.\n"
-            f"ffmpeg stderr: {e.stderr.decode(errors='replace')}"
+            f"ffmpeg stderr: {error_msg}"
         ) from e
 
     finally:

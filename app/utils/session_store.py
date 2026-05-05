@@ -5,6 +5,7 @@ from datetime import datetime
 import redis
 
 from config.settings import settings
+from utils.logger import session_logger
 
 
 # ── Redis connection ───────────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ def create_session(session_id: str) -> dict:
         "exchanges"      : [],
     }
     _save(session_id, session)
+    session_logger.info(f"[{session_id}] Session created")
     return session
 
 
@@ -49,6 +51,7 @@ def create_session(session_id: str) -> dict:
 def get_session(session_id: str) -> dict | None:
     data = client.get(session_id)
     if data is None:
+        session_logger.warning(f"[{session_id}] Session not found in Redis")
         return None
     return json.loads(data)
 
@@ -63,12 +66,14 @@ def add_exchange(
 ) -> None:
     session = get_session(session_id)
     if session is None:
+        session_logger.warning(f"[{session_id}] Cannot add exchange — session not found")
         return
 
     session["exchange_count"] += 1
+    exchange_number = session["exchange_count"]
 
     session["exchanges"].append({
-        "exchange_number" : session["exchange_count"],
+        "exchange_number" : exchange_number,
         "caller_message"  : caller_message,
         "agent_reply"     : agent_reply,
         "timestamp"       : datetime.utcnow().isoformat(),
@@ -81,8 +86,10 @@ def add_exchange(
             value = extracted_info.get(field)
             if value and session[field] is None:
                 session[field] = value
+                session_logger.debug(f"[{session_id}] Extracted {field}: {value}")
 
     _save(session_id, session)
+    session_logger.debug(f"[{session_id}] Exchange {exchange_number} saved to Redis")
 
 
 # ── End session ───────────────────────────────────────────────────────────────
@@ -90,11 +97,13 @@ def add_exchange(
 def end_session(session_id: str) -> dict | None:
     session = get_session(session_id)
     if session is None:
+        session_logger.warning(f"[{session_id}] Cannot end session — not found in Redis")
         return None
 
     session["is_ended"] = True
     session["end_time"] = datetime.utcnow().isoformat()
     _save(session_id, session)
+    session_logger.info(f"[{session_id}] Session marked as ended")
     return session
 
 
@@ -102,9 +111,11 @@ def end_session(session_id: str) -> dict | None:
 
 def delete_session(session_id: str) -> None:
     client.delete(session_id)
+    session_logger.info(f"[{session_id}] Session deleted from Redis")
 
 
 # ── Internal save ─────────────────────────────────────────────────────────────
 
 def _save(session_id: str, session: dict) -> None:
     client.setex(session_id, SESSION_TTL, json.dumps(session))
+    session_logger.debug(f"[{session_id}] Session saved to Redis (TTL={SESSION_TTL}s)")

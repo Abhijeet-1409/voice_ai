@@ -3,6 +3,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from config.settings import settings
+from utils.logger import email_logger
 
 
 def send_email_notification(session: dict) -> bool:
@@ -11,6 +12,8 @@ def send_email_notification(session: dict) -> bool:
     Returns True if sent successfully, False if failed.
     Never raises an exception — email failure should not crash the app.
     """
+    session_id = session.get("session_id", "unknown")
+
     try:
         # ── Build email content ────────────────────────────────────────────
         subject = f"New Intelics Call — {session.get('caller_name') or 'Unknown Caller'}"
@@ -25,6 +28,8 @@ def send_email_notification(session: dict) -> bool:
         msg.attach(MIMEText(body, "plain"))
 
         # ── Send via Gmail SMTP SSL ────────────────────────────────────────
+        email_logger.info(f"[{session_id}] Sending call summary to {settings.notification_email}")
+
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(settings.gmail_address, settings.gmail_app_password)
             server.sendmail(
@@ -33,10 +38,11 @@ def send_email_notification(session: dict) -> bool:
                 msg.as_string(),
             )
 
+        email_logger.info(f"[{session_id}] Email sent successfully")
         return True
 
     except Exception as e:
-        print(f"[email_utils] Failed to send email: {e}")
+        email_logger.error(f"[{session_id}] Failed to send email: {e}")
         return False
 
 
