@@ -6,14 +6,15 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from models.db_models import init_db
+from utils.logger import ws_logger
 from utils.session_store import create_session, generate_session_id, get_session
 from handlers.websocket_handler import handle_websocket
 
 # ── Import all services at startup so models load ONCE ────────────────────────
 # These imports trigger model loading at module level inside each service file.
 # All 3 models are ready before the first customer call arrives.
-import services.stt_service   # noqa: F401  loads faster-whisper
-import services.tts_service   # noqa: F401  loads Kokoro
+import services.stt_service   # noqa: F401  loads cartesia ink whisper STT
+import services.tts_service   # noqa: F401  loads cartesia sonic
 import services.rag_service   # noqa: F401  loads all-MiniLM-L6-v2 + rate card
 
 
@@ -22,13 +23,13 @@ import services.rag_service   # noqa: F401  loads all-MiniLM-L6-v2 + rate card
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
-    print("[main] Starting Intelics Voice AI Agent...")
+    ws_logger.info("Starting Intelics Voice AI Agent...")
     init_db()
-    print("[main] Database tables ready.")
-    print("[main] All models loaded. Server ready.")
+    ws_logger.info("Database tables ready")
+    ws_logger.info("All models loaded — server ready")
     yield
-    # Shutdown (nothing to clean up)
-    print("[main] Shutting down.")
+    # Shutdown
+    ws_logger.info("Shutting down Intelics Voice AI Agent")
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -75,8 +76,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     if session_id == "new":
         session_id = generate_session_id()
         create_session(session_id)
+        ws_logger.info(f"[{session_id}] New call — session created")
 
-        # Send session_id to browser so it can store it
         await websocket.send_text(
             f'{{"type": "session_id", "session_id": "{session_id}"}}'
         )
@@ -86,11 +87,15 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         session = get_session(session_id)
         if not session:
             # Session expired or invalid — treat as new
+            ws_logger.warning(f"[{session_id}] Session not found or expired — creating new session")
             session_id = generate_session_id()
             create_session(session_id)
+            ws_logger.info(f"[{session_id}] New session created as replacement")
             await websocket.send_text(
                 f'{{"type": "session_id", "session_id": "{session_id}"}}'
             )
+        else:
+            ws_logger.info(f"[{session_id}] Existing session resumed")
 
     # ── Hand off to handler ────────────────────────────────────────────────
     await handle_websocket(websocket, session_id)

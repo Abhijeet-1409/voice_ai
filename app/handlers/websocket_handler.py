@@ -10,6 +10,7 @@ import asyncio
 import base64
 import json
 import os
+import time
 from enum import Enum
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -20,6 +21,7 @@ from services import stt_service
 from services.llm_service import stream_reply
 from utils.audio_utils import webm_to_wav
 from utils.email_utils import send_email_notification
+from utils.logger import ws_logger, db_logger
 from utils.session_store import (
     add_exchange,
     delete_session,
@@ -54,13 +56,17 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
     audio_buffer = bytearray()   # accumulates WebM chunks during one utterance
     speak_task   = None          # currently running _process_exchange Task
 
+    ws_logger.info(f"[{session_id}] Call started — WebSocket connected")
+
     # ── One Cartesia TTS connection per call ──────────────────────────────────
     tts = CartesiaTTS()
     await tts.connect()
+    ws_logger.debug(f"[{session_id}] Cartesia TTS connected")
 
     try:
         # Tell browser we are ready
         await _send(websocket, {"type": "listening"})
+        ws_logger.debug(f"[{session_id}] Sent listening signal to browser")
 
         while True:
             raw      = await websocket.receive_text()
@@ -72,10 +78,12 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
                 if state == CallState.LISTENING:
                     chunk_bytes = base64.b64decode(msg["data"])
                     audio_buffer.extend(chunk_bytes)
+                    ws_logger.debug(f"[{session_id}] Audio chunk received — buffer: {len(audio_buffer) / 1024:.1f}KB")
 
             # ── audio_end — customer finished speaking ─────────────────────
             elif msg_type == "audio_end":
                 if state == CallState.LISTENING and len(audio_buffer) > 0:
+                    ws_logger.info(f"[{session_id}] Audio end received — buffer: {len(audio_buffer) / 1024:.1f}KB — starting processing")
                     state = CallState.SPEAKING
 
                     # Run the full STT → LLM → TTS pipeline as a cancellable Task
@@ -93,16 +101,18 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
                         await speak_task
                     except asyncio.CancelledError:
                         # Barge-in cancelled this task — that is expected
-                        pass
+                        ws_logger.info(f"[{session_id}] speak_task cancelled — barge-in")
 
                     # Only go back to LISTENING if we weren't interrupted
-                    # (interrupt handler sets state itself)
                     if state == CallState.SPEAKING:
                         state = CallState.LISTENING
                         await _send(websocket, {"type": "listening"})
+                        ws_logger.debug(f"[{session_id}] Back to LISTENING state")
 
             # ── interrupt — customer spoke during agent audio ───────────────
             elif msg_type == "interrupt":
+                ws_logger.info(f"[{session_id}] Barge-in triggered — cancelling agent speech")
+
                 # Cancel TTS streaming immediately
                 if speak_task and not speak_task.done():
                     speak_task.cancel()
@@ -114,17 +124,20 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
                 audio_buffer.clear()
                 state = CallState.LISTENING
                 await _send(websocket, {"type": "listening"})
+                ws_logger.debug(f"[{session_id}] Barge-in complete — back to LISTENING")
 
     except WebSocketDisconnect:
+        ws_logger.info(f"[{session_id}] WebSocket disconnected")
         await _handle_call_end(session_id)
 
     except Exception as e:
-        print(f"[websocket_handler] Unexpected error: {e}")
+        ws_logger.error(f"[{session_id}] Unexpected error — {e}")
         await _handle_call_end(session_id)
 
     finally:
         # Always close the Cartesia TTS WebSocket when the call ends
         await tts.close()
+        ws_logger.debug(f"[{session_id}] Cartesia TTS connection closed")
 
 
 # ── Process one exchange ──────────────────────────────────────────────────────
@@ -148,46 +161,52 @@ async def _process_exchange(
         webm_bytes: Complete WebM audio blob from browser
         tts:        CartesiaTTS instance for this call
     """
-    wav_path = None
+    wav_path   = None
+    start_time = time.time()
+
+    ws_logger.debug(f"[{session_id}] _process_exchange started")
 
     try:
         # ── Step 1: WebM → 16kHz mono WAV ─────────────────────────────────
-        wav_path   = webm_to_wav(webm_bytes)
+        wav_path = webm_to_wav(webm_bytes, session_id=session_id)
 
-        # ── Step 2: WAV → transcript (Cartesia Ink) ────────────────────────
-        transcript = stt_service.transcribe(wav_path)
+        # ── Step 2: WAV → transcript ───────────────────────────────────────
+        transcript = stt_service.transcribe(wav_path, session_id=session_id)
 
         if not transcript.strip():
+            ws_logger.warning(f"[{session_id}] Empty transcript — skipping exchange")
             return
 
         # ── Step 3: Send transcript to browser ────────────────────────────
         await _send(websocket, {"type": "transcript", "text": transcript})
+        ws_logger.debug(f"[{session_id}] Transcript sent to browser")
 
         # ── Step 4: Get conversation history from Redis ────────────────────
         session = get_session(session_id)
         history = session.get("exchanges", []) if session else []
+        ws_logger.debug(f"[{session_id}] History loaded — {len(history)} exchanges")
 
         # ── Step 5: Stream LLM reply sentence by sentence ─────────────────
-        extracted_info = {}
-        full_reply     = []
+        extracted_info  = {}
+        full_reply      = []
+        sentence_count  = 0
 
-        async for sentence in stream_reply(transcript, history, extracted_info):
+        async for sentence in stream_reply(transcript, history, extracted_info, session_id=session_id):
             full_reply.append(sentence)
+            sentence_count += 1
 
-            # ── Step 6: Synthesize sentence → PCM bytes (Cartesia Sonic) ───
-            # synthesize() is an async generator — yields chunks as they arrive
-            # If speak_task is cancelled, CancelledError raises here and
-            # propagates up naturally, stopping mid-sentence immediately
+            # ── Step 6: Synthesize sentence → PCM bytes ────────────────────
             audio_chunks = bytearray()
-            async for pcm_chunk in tts.synthesize(sentence):
+            async for pcm_chunk in tts.synthesize(sentence, session_id=session_id):
                 audio_chunks.extend(pcm_chunk)
 
             if audio_chunks:
-                # ── Step 7: Send audio to browser (base64 encoded) ─────────
+                # ── Step 7: Send audio to browser ──────────────────────────
                 await _send(websocket, {
                     "type": "audio_chunk",
                     "data": base64.b64encode(bytes(audio_chunks)).decode("utf-8"),
                 })
+                ws_logger.debug(f"[{session_id}] Audio chunk sent — sentence {sentence_count} — {len(audio_chunks) / 1024:.1f}KB")
 
         # ── Step 8: Signal agent finished speaking ─────────────────────────
         await _send(websocket, {"type": "audio_end"})
@@ -204,10 +223,14 @@ async def _process_exchange(
             extracted_info = extracted_info,
         )
 
+        elapsed = time.time() - start_time
+        ws_logger.info(f"[{session_id}] Exchange complete — {sentence_count} sentences — {elapsed:.2f}s total")
+
     finally:
         # Always clean up temp WAV file even if cancelled mid-stream
         if wav_path and os.path.exists(wav_path):
             os.unlink(wav_path)
+            ws_logger.debug(f"[{session_id}] Temp WAV file cleaned up")
 
 
 # ── Call end ──────────────────────────────────────────────────────────────────
@@ -218,23 +241,23 @@ async def _handle_call_end(session_id: str) -> None:
     Saves full session to PostgreSQL, sends email, cleans up Redis.
     All steps run independently — one failure does not skip the rest.
     """
-    print(f"[websocket_handler] Call ended: {session_id}")
+    ws_logger.info(f"[{session_id}] Handling call end")
 
     try:
         session = end_session(session_id)
 
         if not session:
-            print(f"[websocket_handler] Session not found in Redis: {session_id}")
+            ws_logger.warning(f"[{session_id}] Session not found in Redis — skipping cleanup")
             return
 
         _save_to_db(session)
-        send_email_notification(session)
+        send_email_notification(session, session_id=session_id)
         delete_session(session_id)
 
-        print(f"[websocket_handler] Cleanup complete: {session_id}")
+        ws_logger.info(f"[{session_id}] Call cleanup complete — {session.get('exchange_count', 0)} exchanges")
 
     except Exception as e:
-        print(f"[websocket_handler] Call end error: {e}")
+        ws_logger.error(f"[{session_id}] Call end error — {e}")
 
 
 # ── Save to PostgreSQL ────────────────────────────────────────────────────────
@@ -244,7 +267,10 @@ def _save_to_db(session: dict) -> None:
     Write full session to PostgreSQL in one transaction.
     One Call row + one Exchange row per exchange.
     """
-    db = SessionLocal()
+    session_id = session.get("session_id", "unknown")
+    db         = SessionLocal()
+
+    db_logger.debug(f"[{session_id}] Saving session to PostgreSQL")
 
     try:
         call_start = _parse_dt(session.get("start_time"))
@@ -280,11 +306,11 @@ def _save_to_db(session: dict) -> None:
             db.add(exchange)
 
         db.commit()
-        print(f"[websocket_handler] Saved to DB: {session['session_id']}")
+        db_logger.info(f"[{session_id}] Saved to PostgreSQL — {session.get('exchange_count', 0)} exchanges | duration: {duration}s")
 
     except Exception as e:
         db.rollback()
-        print(f"[websocket_handler] DB save failed: {e}")
+        db_logger.error(f"[{session_id}] PostgreSQL save failed — {e}")
 
     finally:
         db.close()
