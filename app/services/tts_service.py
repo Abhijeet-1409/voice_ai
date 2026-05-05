@@ -14,6 +14,7 @@ from typing import AsyncGenerator
 from cartesia import AsyncCartesia
 
 from config.settings import settings
+from utils.logger import tts_logger
 
 TTS_MODEL = "sonic-2"
 VOICE_ID  = "a0e99841-438c-4a64-b679-ae501e7d6091"   # override via settings if needed
@@ -25,24 +26,24 @@ class CartesiaTTS:
 
     Lifecycle (managed by websocket_handler.py):
         tts = CartesiaTTS()
-        await tts.connect()          # call once when call starts
+        await tts.connect(session_id)    # call once when call starts
         ...
-        async for chunk in tts.synthesize(sentence):
-            send_to_browser(chunk)   # called once per sentence
+        async for chunk in tts.synthesize(sentence, session_id):
+            send_to_browser(chunk)       # called once per sentence
         ...
-        await tts.close()            # call once when call ends
+        await tts.close(session_id)      # call once when call ends
     """
 
     def __init__(self):
         self._client = AsyncCartesia(api_key=settings.cartesia_api_key)
         self._ws     = None
 
-    async def connect(self) -> None:
+    async def connect(self, session_id: str) -> None:
         """Open the Cartesia Sonic WebSocket connection for this call."""
         self._ws = await self._client.tts.websocket()
-        print("[tts_service] Cartesia Sonic WebSocket connected")
+        tts_logger.info(f"[{session_id}] Cartesia Sonic WebSocket connected")
 
-    async def synthesize(self, text: str) -> AsyncGenerator[bytes, None]:
+    async def synthesize(self, text: str, session_id: str) -> AsyncGenerator[bytes, None]:
         """
         Stream TTS audio for one sentence.
 
@@ -52,7 +53,8 @@ class CartesiaTTS:
         async generator simply stops yielding.
 
         Args:
-            text: Sentence to synthesize (from LLM sentence stream)
+            text:       Sentence to synthesize (from LLM sentence stream)
+            session_id: Session ID for log tracing
 
         Yields:
             Raw PCM audio bytes ready to base64-encode and send to browser
@@ -61,19 +63,21 @@ class CartesiaTTS:
             return
 
         if self._ws is None:
-            print("[tts_service] synthesize() called before connect()")
+            tts_logger.error(f"[{session_id}] synthesize() called before connect()")
             return
+
+        tts_logger.debug(f"[{session_id}] Synthesizing: {text[:80]}")
 
         try:
             ctx = self._ws.context(
                 model_id=TTS_MODEL,
                 voice={
                     "mode": "id",
-                    "id":   settings.cartesia_voice_id or VOICE_ID,
+                    "id"  : settings.cartesia_voice_id or VOICE_ID,
                 },
                 output_format={
-                    "container":   "raw",
-                    "encoding":    "pcm_s16le",
+                    "container"  : "raw",
+                    "encoding"   : "pcm_s16le",
                     "sample_rate": 16000,
                 },
             )
@@ -81,19 +85,23 @@ class CartesiaTTS:
             await ctx.send(text.strip())
             await ctx.no_more_inputs()
 
+            chunk_count = 0
             async for response in ctx.receive():
                 if response.type == "chunk" and response.audio:
+                    chunk_count += 1
                     yield response.audio
 
-        except Exception as e:
-            print(f"[tts_service] Synthesis error: {e}")
+            tts_logger.debug(f"[{session_id}] Synthesis complete — {chunk_count} audio chunks")
 
-    async def close(self) -> None:
+        except Exception as e:
+            tts_logger.exception(f"[{session_id}] Synthesis error: {e}")
+
+    async def close(self, session_id: str) -> None:
         """Close the Cartesia Sonic WebSocket and the underlying HTTP client."""
         try:
             if self._ws:
                 await self._ws.close()
             await self._client.close()
-            print("[tts_service] Cartesia Sonic WebSocket closed")
+            tts_logger.info(f"[{session_id}] Cartesia Sonic WebSocket closed")
         except Exception as e:
-            print(f"[tts_service] Close error: {e}")
+            tts_logger.error(f"[{session_id}] Close error: {e}")

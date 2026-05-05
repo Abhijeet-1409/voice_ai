@@ -5,6 +5,8 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
+from utils.logger import rag_logger
+
 # ── Paths ─────────────────────────────────────────────────────────────────────
 
 RATE_CARD_PATH  = "/app/data/rate_card.xlsx"
@@ -30,11 +32,11 @@ CATEGORY_MAP = {
 
 # ── Model and chunks load ONCE at import time ─────────────────────────────────
 
-print("[rag_service] Loading embedding model...")
+rag_logger.info("Loading embedding model...")
 
 _model = SentenceTransformer(RAG_MODEL_PATH)
 
-print("[rag_service] Reading rate card...")
+rag_logger.info("Reading rate card...")
 
 _chunks: list[dict] = []
 
@@ -45,7 +47,7 @@ def _load_rate_card() -> None:
     Called once at import time. Results stay in memory for server lifetime.
     """
     if not Path(RATE_CARD_PATH).exists():
-        print(f"[rag_service] WARNING: Rate card not found at {RATE_CARD_PATH}")
+        rag_logger.warning(f"Rate card not found at {RATE_CARD_PATH}")
         return
 
     sheets = pd.read_excel(RATE_CARD_PATH, sheet_name=None)
@@ -57,16 +59,16 @@ def _load_rate_card() -> None:
         sheet_chunks = _build_chunks(df, sheet_name)
         _chunks.extend(sheet_chunks)
 
-    print(f"[rag_service] Built {len(_chunks)} chunks from {len(sheets)} sheets.")
+    rag_logger.info(f"Built {len(_chunks)} chunks from {len(sheets)} sheets.")
 
     # Embed all chunks in one batch — faster than one by one
-    texts = [c["text"] for c in _chunks]
+    texts   = [c["text"] for c in _chunks]
     vectors = _model.encode(texts, show_progress_bar=False)
 
     for i, chunk in enumerate(_chunks):
         chunk["vector"] = vectors[i]
 
-    print("[rag_service] All chunks embedded and ready.")
+    rag_logger.info("All chunks embedded and ready.")
 
 
 def _build_chunks(df: pd.DataFrame, sheet_name: str) -> list[dict]:
@@ -136,13 +138,13 @@ _load_rate_card()
 
 # ── Keyword filter ─────────────────────────────────────────────────────────────
 
-def _keyword_filter(query: str) -> list[str]:
+def _keyword_filter(query: str, session_id: str) -> list[str]:
     """
     Detect relevant categories from customer transcript words.
     Returns list of matched category strings.
     Returns empty list if no match (caller will use all chunks as fallback).
     """
-    words = query.lower().split()
+    words    = query.lower().split()
     detected = []
 
     for category, triggers in CATEGORY_MAP.items():
@@ -152,29 +154,35 @@ def _keyword_filter(query: str) -> list[str]:
                     detected.append(category)
                 break
 
+    rag_logger.debug(f"[{session_id}] Keyword filter detected: {detected or 'none — using all chunks'}")
     return detected
 
 
-def _filter_chunks(detected_categories: list[str]) -> list[dict]:
+def _filter_chunks(detected_categories: list[str], session_id: str) -> list[dict]:
     """
     Filter chunks to only those matching detected categories.
     Falls back to all chunks if no categories detected.
     """
     if not detected_categories:
-        return _chunks   # fallback — search everything
+        rag_logger.debug(f"[{session_id}] No category match — searching all {len(_chunks)} chunks")
+        return _chunks
 
-    return [
+    filtered = [
         chunk for chunk in _chunks
         if any(cat in chunk["categories"] for cat in detected_categories)
     ]
 
+    rag_logger.debug(f"[{session_id}] Filtered to {len(filtered)} chunks from {len(_chunks)}")
+    return filtered
 
-def _embedding_search(query: str, filtered: list[dict], top_n: int = TOP_N) -> list[dict]:
+
+def _embedding_search(query: str, filtered: list[dict], session_id: str, top_n: int = TOP_N) -> list[dict]:
     """
     Encode query and compute cosine similarity against filtered chunks.
     Returns top_n highest scoring chunks.
     """
     if not filtered:
+        rag_logger.warning(f"[{session_id}] No chunks to search")
         return []
 
     query_vector  = _model.encode([query])
@@ -183,12 +191,19 @@ def _embedding_search(query: str, filtered: list[dict], top_n: int = TOP_N) -> l
     scores  = cosine_similarity(query_vector, chunk_vectors)[0]
     top_idx = np.argsort(scores)[::-1][:top_n]
 
-    return [filtered[i] for i in top_idx]
+    top_chunks = [filtered[i] for i in top_idx]
+
+    rag_logger.debug(
+        f"[{session_id}] Top match: score={scores[top_idx[0]]:.3f} | "
+        f"{top_chunks[0]['text'][:80]}"
+    )
+
+    return top_chunks
 
 
 # ── Public interface ───────────────────────────────────────────────────────────
 
-def retrieve(transcript: str, history: list | None = None) -> str:
+def retrieve(transcript: str, session_id: str, history: list | None = None) -> str:
     """
     Main RAG function. Called by llm_service before every Gemini call.
 
@@ -198,21 +213,26 @@ def retrieve(transcript: str, history: list | None = None) -> str:
 
     Args:
         transcript: Current customer message
-        history:    Conversation history (not used in search, reserved for future)
+        session_id: Session ID for log tracing
+        history:    Conversation history (reserved for future use)
 
     Returns:
         Formatted string with top matching pricing rows.
         Empty string if no chunks found.
     """
-    detected   = _keyword_filter(transcript)
-    filtered   = _filter_chunks(detected)
-    top_chunks = _embedding_search(transcript, filtered)
+    rag_logger.debug(f"[{session_id}] RAG retrieve: {transcript[:80]}")
+
+    detected   = _keyword_filter(transcript, session_id)
+    filtered   = _filter_chunks(detected, session_id)
+    top_chunks = _embedding_search(transcript, filtered, session_id)
 
     if not top_chunks:
+        rag_logger.info(f"[{session_id}] No relevant pricing chunks found")
         return ""
 
     lines = ["Relevant pricing from Intelics rate card:"]
     for chunk in top_chunks:
         lines.append(f"- {chunk['text']}")
 
+    rag_logger.info(f"[{session_id}] Returning {len(top_chunks)} pricing chunks to LLM")
     return "\n".join(lines)

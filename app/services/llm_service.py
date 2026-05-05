@@ -5,6 +5,7 @@ import google.generativeai as genai
 
 from config.settings import settings
 from services.rag_service import retrieve
+from utils.logger import llm_logger
 
 # ── Configure Gemini ──────────────────────────────────────────────────────────
 
@@ -12,7 +13,7 @@ genai.configure(api_key=settings.gemini_api_key)
 
 _model = genai.GenerativeModel(settings.gemini_model)
 
-print("[llm_service] Gemini model ready.")
+llm_logger.info("Gemini model ready.")
 
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -67,7 +68,8 @@ Return ONLY the JSON object. No preamble. No markdown. No explanation outside th
 async def stream_reply(
     transcript     : str,
     history        : list,
-    extracted_info : dict | None = None,
+    extracted_info : dict | None,
+    session_id     : str,
 ):
     """
     Stream Gemini reply sentence by sentence.
@@ -77,6 +79,7 @@ async def stream_reply(
         transcript:     Current customer message
         history:        List of previous exchanges from Redis session
         extracted_info: Mutable dict — updated with any newly extracted info
+        session_id:     Session ID for log tracing
 
     Yields:
         One sentence at a time as a string.
@@ -84,13 +87,16 @@ async def stream_reply(
     """
 
     # Stage 1 — get pricing context from RAG
-    pricing_context = retrieve(transcript, history)
+    llm_logger.debug(f"[{session_id}] Fetching RAG context...")
+    pricing_context = retrieve(transcript, session_id, history)
 
     # Stage 2 — build conversation history for Gemini
     gemini_history = _build_history(history)
 
     # Stage 3 — build current user message with pricing context
     user_message = _build_user_message(transcript, pricing_context)
+
+    llm_logger.info(f"[{session_id}] Sending to Gemini (history={len(history)} exchanges)")
 
     # Stage 4 — stream from Gemini
     buffer = ""
@@ -111,7 +117,7 @@ async def stream_reply(
                 buffer += chunk.text
 
         # Stage 5 — parse JSON from full response
-        reply_text, info = _parse_response(buffer)
+        reply_text, info = _parse_response(buffer, session_id)
 
         # Update extracted info in place
         if extracted_info is not None and info:
@@ -120,15 +126,18 @@ async def stream_reply(
                 value = info.get(field)
                 if value and extracted_info.get(field) is None:
                     extracted_info[field] = value
+                    llm_logger.debug(f"[{session_id}] Extracted {field}: {value}")
 
         # Stage 6 — yield reply sentence by sentence for TTS
         sentences = _split_sentences(reply_text)
+        llm_logger.info(f"[{session_id}] Reply split into {len(sentences)} sentences")
+
         for sentence in sentences:
             if sentence.strip():
                 yield sentence.strip()
 
     except Exception as e:
-        print(f"[llm_service] Gemini error: {e}")
+        llm_logger.exception(f"[{session_id}] Gemini error: {e}")
         yield "I'm sorry, I had a small technical issue. Could you repeat that?"
 
 
@@ -156,7 +165,7 @@ def _build_user_message(transcript: str, pricing_context: str) -> str:
     return transcript
 
 
-def _parse_response(raw: str) -> tuple[str, dict]:
+def _parse_response(raw: str, session_id: str) -> tuple[str, dict]:
     """
     Parse Gemini JSON response into reply text and extracted info dict.
     Falls back gracefully if JSON is malformed.
@@ -174,10 +183,11 @@ def _parse_response(raw: str) -> tuple[str, dict]:
             "caller_need"    : data.get("caller_need"),
             "interest_level" : data.get("interest_level"),
         }
+        llm_logger.debug(f"[{session_id}] JSON parsed successfully")
         return reply, info
 
     except (json.JSONDecodeError, AttributeError) as e:
-        print(f"[llm_service] JSON parse failed: {e} | raw: {raw[:200]}")
+        llm_logger.warning(f"[{session_id}] JSON parse failed: {e} | raw: {raw[:200]}")
         # Return raw text as reply if JSON parsing fails
         return raw.strip(), {}
 
