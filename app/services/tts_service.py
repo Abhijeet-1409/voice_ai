@@ -1,5 +1,5 @@
 """
-tts_service.py — Text-to-Speech using Cartesia Sonic SDK WebSocket
+tts_service.py — Text-to-Speech using Cartesia Sonic 3.5 SDK WebSocket
 
 One CartesiaTTS instance is created per active call in websocket_handler.py.
 The WebSocket connection to Cartesia opens when the call starts and closes
@@ -7,6 +7,24 @@ when the call ends — giving full isolation between concurrent callers.
 
 Each call to synthesize() creates a new context on the same connection,
 streams audio chunks back as raw bytes, and closes the context when done.
+
+Model: sonic-3.5 (latest stable — released May 4, 2026)
+Voice: Katie (f786b574-daa5-4673-aa0c-cbe3e8534c02)
+       Recommended by Cartesia for voice agents — stable, realistic, American English
+
+WebSocket generation request structure (from Cartesia docs):
+  context()              → creates a context ID only — no params
+  ctx.send(              → generation request goes here:
+      model_id           → model to use
+      transcript         → text to synthesize
+      voice              → voice config
+      output_format      → audio format
+      language           → language code
+  )
+  ctx.no_more_inputs()   → signal no more text is coming
+  ctx.receive()          → async generator of WebSocketTtsOutput objects
+                           access audio directly via response.audio
+                           (no .type attribute on WebSocketTtsOutput)
 """
 
 from typing import AsyncGenerator
@@ -16,8 +34,14 @@ from cartesia import AsyncCartesia
 from config.settings import settings
 from utils.logger import tts_logger
 
-TTS_MODEL = "sonic-2"
-VOICE_ID  = "a0e99841-438c-4a64-b679-ae501e7d6091"   # override via settings if needed
+# sonic-3.5 — latest stable model as of May 2026
+# Improvements over sonic-2: higher naturalness, lower latency, 42 languages
+TTS_MODEL = "sonic-3.5"
+
+# Katie — Cartesia's recommended voice for voice agents
+# Stable, realistic American English — better than emotive/studio voices for agents
+# Override via settings.cartesia_voice_id in .env if needed
+VOICE_ID  = "f786b574-daa5-4673-aa0c-cbe3e8534c02"
 
 
 class CartesiaTTS:
@@ -26,12 +50,12 @@ class CartesiaTTS:
 
     Lifecycle (managed by websocket_handler.py):
         tts = CartesiaTTS()
-        await tts.connect(session_id)    # call once when call starts
+        await tts.connect(session_id)          # call once when call starts
         ...
         async for chunk in tts.synthesize(sentence, session_id):
-            send_to_browser(chunk)       # called once per sentence
+            send_to_browser(chunk)             # called once per sentence
         ...
-        await tts.close(session_id)      # call once when call ends
+        await tts.close(session_id)            # call once when call ends
     """
 
     def __init__(self):
@@ -41,7 +65,7 @@ class CartesiaTTS:
     async def connect(self, session_id: str) -> None:
         """Open the Cartesia Sonic WebSocket connection for this call."""
         self._ws = await self._client.tts.websocket()
-        tts_logger.info(f"[{session_id}] Cartesia Sonic WebSocket connected")
+        tts_logger.info(f"[{session_id}] Cartesia Sonic WebSocket connected (model={TTS_MODEL})")
 
     async def synthesize(self, text: str, session_id: str) -> AsyncGenerator[bytes, None]:
         """
@@ -69,25 +93,32 @@ class CartesiaTTS:
         tts_logger.debug(f"[{session_id}] Synthesizing: {text[:80]}")
 
         try:
-            ctx = self._ws.context(
-                model_id=TTS_MODEL,
-                voice={
+            # context() takes no params — just creates a context ID
+            # All generation params go into ctx.send()
+            ctx = self._ws.context()
+
+            await ctx.send(
+                model_id      = TTS_MODEL,
+                transcript    = text.strip(),
+                voice         = {
                     "mode": "id",
                     "id"  : settings.cartesia_voice_id or VOICE_ID,
                 },
-                output_format={
+                output_format = {
                     "container"  : "raw",
                     "encoding"   : "pcm_s16le",
                     "sample_rate": 16000,
                 },
+                language = "en",
             )
 
-            await ctx.send(text.strip())
             await ctx.no_more_inputs()
 
             chunk_count = 0
             async for response in ctx.receive():
-                if response.type == "chunk" and response.audio:
+                # WebSocketTtsOutput has no .type attribute
+                # audio is accessed directly via response.audio
+                if response.audio is not None:
                     chunk_count += 1
                     yield response.audio
 

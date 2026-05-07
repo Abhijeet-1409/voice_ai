@@ -60,7 +60,7 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
 
     # ── One Cartesia TTS connection per call ──────────────────────────────────
     tts = CartesiaTTS()
-    await tts.connect()
+    await tts.connect(session_id)
     ws_logger.debug(f"[{session_id}] Cartesia TTS connected")
 
     try:
@@ -136,7 +136,7 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
 
     finally:
         # Always close the Cartesia TTS WebSocket when the call ends
-        await tts.close()
+        await tts.close(session_id)
         ws_logger.debug(f"[{session_id}] Cartesia TTS connection closed")
 
 
