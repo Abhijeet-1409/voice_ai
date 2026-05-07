@@ -226,6 +226,10 @@ def retrieve(transcript: str, session_id: str, history: list | None = None) -> s
     filtered   = _filter_chunks(detected, session_id)
     top_chunks = _embedding_search(transcript, filtered, session_id)
 
+    rag_logger.info(f"[{session_id}] RAG found {detected} as detected keywords")
+    rag_logger.info(f"[{session_id}] RAG found {len(filtered)} filtered chunks")
+    rag_logger.info(f"[{session_id}] RAG found {len(top_chunks)} top chunks")
+
     if not top_chunks:
         rag_logger.info(f"[{session_id}] No relevant pricing chunks found")
         return ""
