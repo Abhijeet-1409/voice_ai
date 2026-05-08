@@ -112,6 +112,8 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
             # ── interrupt — customer spoke during agent audio ───────────────
             elif msg_type == "interrupt":
                 ws_logger.info(f"[{session_id}] Barge-in triggered — cancelling agent speech")
+                audio_buffer.clear()
+                state = CallState.LISTENING
 
                 # Cancel TTS streaming immediately
                 if speak_task and not speak_task.done():
@@ -119,19 +121,17 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
                     try:
                         await speak_task
                     except asyncio.CancelledError:
-                        pass
+                        ws_logger.info(f"[{session_id}] speak_task cancelled — barge-in")
 
-                audio_buffer.clear()
-                state = CallState.LISTENING
                 await _send(websocket, {"type": "listening"})
-                ws_logger.debug(f"[{session_id}] Barge-in complete — back to LISTENING")
+                ws_logger.info(f"[{session_id}] Barge-in complete — back to LISTENING")
 
     except WebSocketDisconnect:
         ws_logger.info(f"[{session_id}] WebSocket disconnected")
         await _handle_call_end(session_id)
 
     except Exception as e:
-        ws_logger.error(f"[{session_id}] Unexpected error — {e}")
+        ws_logger.exception(f"[{session_id}] Unexpected error — {e}")
         await _handle_call_end(session_id)
 
     finally:
@@ -225,6 +225,9 @@ async def _process_exchange(
 
         elapsed = time.time() - start_time
         ws_logger.info(f"[{session_id}] Exchange complete — {sentence_count} sentences — {elapsed:.2f}s total")
+    
+    except Exception as e:
+        ws_logger.exception(f"[{session_id}] Exchange failed — {e}")
 
     finally:
         # Always clean up temp WAV file even if cancelled mid-stream
@@ -322,8 +325,8 @@ async def _send(websocket: WebSocket, data: dict) -> None:
     """Send JSON over WebSocket. Silently ignores errors (client may have disconnected)."""
     try:
         await websocket.send_text(json.dumps(data))
-    except Exception:
-        pass
+    except Exception as e:
+        ws_logger.debug(f"WebSocket send failed — type={data.get('type')} — {e}")
 
 
 def _parse_dt(value: str | None):

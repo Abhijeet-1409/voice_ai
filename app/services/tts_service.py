@@ -88,7 +88,7 @@ class CartesiaTTS:
 
         if self._ws is None:
             tts_logger.error(f"[{session_id}] synthesize() called before connect()")
-            return
+            raise RuntimeError(f"[{session_id}] TTS synthesize() called before connect()")
 
         tts_logger.debug(f"[{session_id}] Synthesizing: {text[:80]}")
 
