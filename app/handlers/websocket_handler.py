@@ -171,7 +171,7 @@ async def _process_exchange(
         wav_path = webm_to_wav(webm_bytes, session_id=session_id)
 
         # ── Step 2: WAV → transcript ───────────────────────────────────────
-        transcript = stt_service.transcribe(wav_path, session_id=session_id)
+        transcript = await stt_service.transcribe(wav_path, session_id=session_id)
 
         if not transcript.strip():
             ws_logger.warning(f"[{session_id}] Empty transcript — skipping exchange")
@@ -250,7 +250,7 @@ async def _handle_call_end(session_id: str) -> None:
             ws_logger.warning(f"[{session_id}] Session not found in Redis — skipping cleanup")
             return
 
-        _save_to_db(session)
+        await asyncio.to_thread(_save_to_db, session)
         send_email_notification(session, session_id=session_id)
         delete_session(session_id)
 

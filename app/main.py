@@ -29,6 +29,7 @@ async def lifespan(app: FastAPI):
     ws_logger.info("All models loaded — server ready")
     yield
     # Shutdown
+    await services.stt_service._http_client.aclose()
     ws_logger.info("Shutting down Intelics Voice AI Agent")
 
 
