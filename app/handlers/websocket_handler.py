@@ -38,6 +38,22 @@ class CallState(Enum):
     SPEAKING   = "speaking"    # TTS streaming to browser
 
 
+class CallContext:
+    def __init__(self):
+        self._state: CallState = CallState.LISTENING
+
+    @property
+    def state(self) -> CallState:
+        return self._state
+
+    @state.setter
+    def state(self, value: CallState) -> None:
+        if not isinstance(value, CallState):
+            raise ValueError(f"Expected CallState, got {type(value).__name__}: {value}")
+        ws_logger.info(f"State transition → {self._state.value} → {value.value}")
+        self._state = value
+
+
 # ── Main handler ──────────────────────────────────────────────────────────────
 
 async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
@@ -52,7 +68,7 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
         websocket:  FastAPI WebSocket connection
         session_id: Unique session ID — already created in Redis by main.py
     """
-    state        = CallState.LISTENING
+    ctx        = CallContext()     # manages LISTENING vs PROCESSING vs SPEAKING state
     audio_buffer = bytearray()   # accumulates WebM chunks during one utterance
     speak_task   = None          # currently running _process_exchange Task
 
@@ -75,16 +91,16 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
 
             # ── audio_chunk — browser sending mic audio ────────────────────
             if msg_type == "audio_chunk":
-                if state == CallState.LISTENING:
+                if ctx.state == CallState.LISTENING:
                     chunk_bytes = base64.b64decode(msg["data"])
                     audio_buffer.extend(chunk_bytes)
                     ws_logger.debug(f"[{session_id}] Audio chunk received — buffer: {len(audio_buffer) / 1024:.1f}KB")
 
             # ── audio_end — customer finished speaking ─────────────────────
             elif msg_type == "audio_end":
-                if state == CallState.LISTENING and len(audio_buffer) > 0:
+                if ctx.state == CallState.LISTENING and len(audio_buffer) > 0:
                     ws_logger.info(f"[{session_id}] Audio end received — buffer: {len(audio_buffer) / 1024:.1f}KB — starting processing")
-                    state = CallState.SPEAKING
+                    ctx.state = CallState.PROCESSING
 
                     # Run the full STT → LLM → TTS pipeline as a cancellable Task
                     speak_task = asyncio.create_task(
@@ -93,6 +109,7 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
                             session_id = session_id,
                             webm_bytes = bytes(audio_buffer),
                             tts        = tts,
+                            ctx        = ctx,
                         )
                     )
                     audio_buffer.clear()
@@ -104,16 +121,15 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
                         ws_logger.info(f"[{session_id}] speak_task cancelled — barge-in")
 
                     # Only go back to LISTENING if we weren't interrupted
-                    if state == CallState.SPEAKING:
-                        state = CallState.LISTENING
+                    if ctx.state == CallState.SPEAKING:
+                        ctx.state = CallState.LISTENING
                         await _send(websocket, {"type": "listening"})
-                        ws_logger.debug(f"[{session_id}] Back to LISTENING state")
 
             # ── interrupt — customer spoke during agent audio ───────────────
             elif msg_type == "interrupt":
                 ws_logger.info(f"[{session_id}] Barge-in triggered — cancelling agent speech")
                 audio_buffer.clear()
-                state = CallState.LISTENING
+                ctx.state = CallState.LISTENING
 
                 # Cancel TTS streaming immediately
                 if speak_task and not speak_task.done():
@@ -147,6 +163,7 @@ async def _process_exchange(
     session_id : str,
     webm_bytes : bytes,
     tts        : CartesiaTTS,
+    ctx        : CallContext,
 ) -> None:
     """
     Full pipeline for one customer utterance:
@@ -194,6 +211,10 @@ async def _process_exchange(
         async for sentence in stream_reply(transcript, history, extracted_info, session_id=session_id):
             full_reply.append(sentence)
             sentence_count += 1
+
+            # Transition to SPEAKING on first sentence only
+            if ctx.state == CallState.PROCESSING:
+                ctx.state = CallState.SPEAKING
 
             # ── Step 6: Synthesize sentence → PCM bytes ────────────────────
             audio_chunks = bytearray()
