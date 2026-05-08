@@ -40,6 +40,16 @@ CONVERSATION RULES:
 - If customer gives their name, use it naturally in the conversation
 - If customer seems interested — offer to connect them with the sales team
 
+INFORMATION COLLECTION RULES (very important):
+- Your goal is to naturally collect the customer's name, phone number and email before the call ends
+- Do NOT ask for all details at once — collect them one at a time, woven naturally into the conversation
+- Ask for their name early — within the first 2 exchanges if they haven't given it
+- Ask for their phone number after you have answered their main question and they seem satisfied
+- Ask for their email last — after phone number is collected or if they decline to give phone
+- If the customer seems hesitant — reassure them naturally: "Just so our team can follow up with you"
+- If the customer declines to give any detail — do not ask again, move on naturally
+- Never make the customer feel interrogated — keep it conversational and warm
+
 EXTRACTION RULES:
 At the end of your JSON response, always extract any information mentioned by the customer:
 - caller_name: their first name or full name if mentioned
@@ -197,5 +207,5 @@ def _split_sentences(text: str) -> list[str]:
     Split reply text into sentences for sentence-by-sentence TTS.
     Splits on . ? ! followed by space or end of string.
     """
-    sentences = re.split(r"(?<=[.?!])\s+", text)
+    sentences = re.split(r'(?<=[.?!])(?:[\"\']?\s+|\s*$)', text)
     return [s.strip() for s in sentences if s.strip()]
