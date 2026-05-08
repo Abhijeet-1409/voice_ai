@@ -193,7 +193,7 @@ def load_rag_service():
     import services.rag_service as rag
 
     elapsed = time.time() - t0
-    chunk_count = len(rag.chunks) if hasattr(rag, 'chunks') else "unknown"
+    chunk_count = len(rag._chunks) if hasattr(rag, 'chunks') else "unknown"
     print(f"✅  RAG service loaded in {elapsed:.2f}s")
     print(f"    Total chunks built and embedded: {chunk_count}")
 
@@ -242,7 +242,7 @@ def run_single_query(rag, query_info: dict, query_num: int, total: int) -> bool:
 
     # --- Step 2: Run full RAG pipeline ---
     t0 = time.time()
-    context = rag.retrieve(query, history=[])
+    context = rag.retrieve(query,session_id="test", history=[])
     elapsed = time.time() - t0
 
     print(f"Retrieval time: {elapsed:.3f}s")
@@ -254,12 +254,10 @@ def run_single_query(rag, query_info: dict, query_num: int, total: int) -> bool:
         return False
 
     print(f"\nRAG output (injected into Gemini prompt):")
-    print("┌" + "─" * 63 + "┐")
+    print("-" * 65)
     for line in context.strip().split("\n"):
-        # Truncate long lines for readability in terminal
-        display_line = line[:61] + ".." if len(line) > 63 else line
-        print(f"│ {display_line:<62}│")
-    print("└" + "─" * 63 + "┘")
+        print(line)
+    print("-" * 65)
 
     # --- Step 4: Verify expected sheet appears in results ---
     if expected_sheet:
