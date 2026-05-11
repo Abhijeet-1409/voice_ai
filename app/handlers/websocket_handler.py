@@ -82,7 +82,7 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
     try:
         # Tell browser we are ready
         await _send(websocket, {"type": "listening"})
-        ws_logger.debug(f"[{session_id}] Sent listening signal to browser")
+        ws_logger.info(f"[{session_id}] Sent listening signal to browser")
 
         while True:
             raw      = await websocket.receive_text()
@@ -94,7 +94,7 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
                 if ctx.state == CallState.LISTENING:
                     chunk_bytes = base64.b64decode(msg["data"])
                     audio_buffer.extend(chunk_bytes)
-                    ws_logger.debug(f"[{session_id}] Audio chunk received — buffer: {len(audio_buffer) / 1024:.1f}KB")
+                    ws_logger.info(f"[{session_id}] Audio chunk received — buffer: {len(audio_buffer) / 1024:.1f}KB")
 
             # ── audio_end — customer finished speaking ─────────────────────
             elif msg_type == "audio_end":
@@ -120,10 +120,11 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
                         # Barge-in cancelled this task — that is expected
                         ws_logger.info(f"[{session_id}] speak_task cancelled — barge-in")
 
-                    # Only go back to LISTENING if we weren't interrupted
-                    if ctx.state == CallState.SPEAKING:
-                        ctx.state = CallState.LISTENING
-                        await _send(websocket, {"type": "listening"})
+            elif msg_type == "ready":
+                if ctx.state == CallState.SPEAKING:
+                    ctx.state = CallState.LISTENING
+                    await _send(websocket, {"type": "listening"})
+                    ws_logger.info(f"[{session_id}] Browser ready — transitioning to LISTENING")
 
             # ── interrupt — customer spoke during agent audio ───────────────
             elif msg_type == "interrupt":
@@ -153,7 +154,7 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
     finally:
         # Always close the Cartesia TTS WebSocket when the call ends
         await tts.close(session_id)
-        ws_logger.debug(f"[{session_id}] Cartesia TTS connection closed")
+        ws_logger.info(f"[{session_id}] Cartesia TTS connection closed")
 
 
 # ── Process one exchange ──────────────────────────────────────────────────────
@@ -181,7 +182,7 @@ async def _process_exchange(
     wav_path   = None
     start_time = time.time()
 
-    ws_logger.debug(f"[{session_id}] _process_exchange started")
+    ws_logger.info(f"[{session_id}] _process_exchange started")
 
     try:
         # ── Step 1: WebM → 16kHz mono WAV ─────────────────────────────────
@@ -196,12 +197,12 @@ async def _process_exchange(
 
         # ── Step 3: Send transcript to browser ────────────────────────────
         await _send(websocket, {"type": "transcript", "text": transcript})
-        ws_logger.debug(f"[{session_id}] Transcript sent to browser")
+        ws_logger.info(f"[{session_id}] Transcript sent to browser")
 
         # ── Step 4: Get conversation history from Redis ────────────────────
         session = get_session(session_id)
         history = session.get("exchanges", []) if session else []
-        ws_logger.debug(f"[{session_id}] History loaded — {len(history)} exchanges")
+        ws_logger.info(f"[{session_id}] History loaded — {len(history)} exchanges")
 
         # ── Step 5: Stream LLM reply sentence by sentence ─────────────────
         extracted_info  = {}
@@ -227,7 +228,7 @@ async def _process_exchange(
                     "type": "audio_chunk",
                     "data": base64.b64encode(bytes(audio_chunks)).decode("utf-8"),
                 })
-                ws_logger.debug(f"[{session_id}] Audio chunk sent — sentence {sentence_count} — {len(audio_chunks) / 1024:.1f}KB")
+                ws_logger.info(f"[{session_id}] Audio chunk sent — sentence {sentence_count} — {len(audio_chunks) / 1024:.1f}KB")
 
         # ── Step 8: Signal agent finished speaking ─────────────────────────
         await _send(websocket, {"type": "audio_end"})
@@ -254,7 +255,7 @@ async def _process_exchange(
         # Always clean up temp WAV file even if cancelled mid-stream
         if wav_path and os.path.exists(wav_path):
             os.unlink(wav_path)
-            ws_logger.debug(f"[{session_id}] Temp WAV file cleaned up")
+            ws_logger.info(f"[{session_id}] Temp WAV file cleaned up")
 
 
 # ── Call end ──────────────────────────────────────────────────────────────────
@@ -275,7 +276,7 @@ async def _handle_call_end(session_id: str) -> None:
             return
 
         await asyncio.to_thread(_save_to_db, session)
-        send_email_notification(session, session_id=session_id)
+        send_email_notification(session)
         delete_session(session_id)
 
         ws_logger.info(f"[{session_id}] Call cleanup complete — {session.get('exchange_count', 0)} exchanges")
