@@ -6,6 +6,9 @@
   <title>Intelics Voice AI</title>
   <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/style.css" />
+
+  <!-- VAD library — Silero model via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.22/dist/bundle.min.js"></script>
 </head>
 <body>
 
@@ -30,11 +33,15 @@
 
   <!-- Footer -->
   <footer>
+
     <!-- Volume visualizer -->
     <div class="viz-row">
       <div class="viz-label">mic</div>
       <div class="bars" id="bars"></div>
     </div>
+
+    <!-- VAD state label -->
+    <div class="vad-status" id="vadStatus">vad inactive</div>
 
     <!-- Session info -->
     <div class="session-info" id="sessionInfo">session — <span>not connected</span></div>
@@ -44,9 +51,10 @@
       <button class="btn btn-start" id="btnStart">Start Call</button>
       <button class="btn btn-end"   id="btnEnd" disabled>End Call</button>
     </div>
-  </footer>
 
+  </footer>
 </div>
+
 <script src="/static/script.js"></script>
 </body>
 </html>

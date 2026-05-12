@@ -1,37 +1,35 @@
-// ── Constants ────────────────────────────────────────────────────────────────
-const WS_URL           = `ws://${location.host}/ws/new`;
-const CHUNK_INTERVAL   = 250;
-const SILENCE_TIMEOUT  = 1800;
-const VOLUME_THRESHOLD = 18;
-const BARGE_MUTE_MS    = 300;
-const BARGE_MIN_MS     = 500;
-const NUM_BARS         = 24;
+// ══════════════════════════════════════════════════════════════════════════════
+//  CONSTANTS
+// ══════════════════════════════════════════════════════════════════════════════
 
-// ── State ────────────────────────────────────────────────────────────────────
-let ws             = null;
-let sessionId      = null;
-let mediaStream    = null;
-let mediaRecorder  = null;
-let audioCtx       = null;
-let analyser       = null;
-let animFrameId    = null;
+const WS_URL        = `ws://${location.host}/ws/new`;
+const NUM_BARS      = 32;
+const VOLUME_THRESH = 18;   // used only for visualizer bar colour
 
-let isRecording     = false;
+// ══════════════════════════════════════════════════════════════════════════════
+//  STATE
+// ══════════════════════════════════════════════════════════════════════════════
+
+let ws              = null;
+let sessionId       = null;
+let mediaStream     = null;
+let audioCtx        = null;
+let analyser        = null;
+let animFrameId     = null;
+let vad             = null;        // @ricky0123/vad-web MicVAD instance
+
 let isAgentSpeaking = false;
-let agentAudioQueue = [];
 let isPlayingAudio  = false;
+let agentAudioQueue = [];
 
-let silenceTimer    = null;
-let bargeStartTime  = null;
-let bargeMuteUntil  = 0;
+// ══════════════════════════════════════════════════════════════════════════════
+//  LOGGER
+// ══════════════════════════════════════════════════════════════════════════════
 
-// ── Logger ────────────────────────────────────────────────────────────────────
-// Centralised logger — prefix every log with timestamp and session ID
 function log(level, ...args) {
-  const ts      = new Date().toISOString().substring(11, 23);  // HH:MM:SS.mmm
-  const sid     = sessionId ? `[${sessionId.substring(0, 8)}]` : '[no-session]';
-  const prefix  = `[${ts}] ${sid}`;
-
+  const ts     = new Date().toISOString().substring(11, 23);
+  const sid    = sessionId ? `[${sessionId.substring(0, 8)}]` : '[no-session]';
+  const prefix = `[${ts}] ${sid}`;
   switch (level) {
     case 'debug': console.debug(prefix, ...args); break;
     case 'warn':  console.warn(prefix, ...args);  break;
@@ -40,7 +38,10 @@ function log(level, ...args) {
   }
 }
 
-// ── DOM ──────────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  DOM REFS
+// ══════════════════════════════════════════════════════════════════════════════
+
 const conversation = document.getElementById('conversation');
 const emptyState   = document.getElementById('emptyState');
 const statusPill   = document.getElementById('statusPill');
@@ -49,8 +50,9 @@ const sessionInfo  = document.getElementById('sessionInfo');
 const btnStart     = document.getElementById('btnStart');
 const btnEnd       = document.getElementById('btnEnd');
 const barsEl       = document.getElementById('bars');
+const vadStatusEl  = document.getElementById('vadStatus');
 
-// ── Build visualizer bars ─────────────────────────────────────────────────────
+// Build visualizer bars
 for (let i = 0; i < NUM_BARS; i++) {
   const b = document.createElement('div');
   b.className = 'bar';
@@ -58,26 +60,37 @@ for (let i = 0; i < NUM_BARS; i++) {
 }
 const bars = Array.from(barsEl.querySelectorAll('.bar'));
 
-// ── Status helpers ────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  STATUS HELPERS
+// ══════════════════════════════════════════════════════════════════════════════
+
 function setStatus(state, label) {
   statusPill.className = `status-pill ${state}`;
   statusText.textContent = label;
   log('debug', `Status → ${state} — "${label}"`);
 }
 
-// ── Add message to UI ─────────────────────────────────────────────────────────
+function setVadStatus(cls, label) {
+  vadStatusEl.className = `vad-status ${cls}`;
+  vadStatusEl.textContent = label;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  MESSAGES
+// ══════════════════════════════════════════════════════════════════════════════
+
 function addMessage(role, text) {
-  if (emptyState) emptyState.remove();
+  if (emptyState && emptyState.parentNode) emptyState.remove();
 
   const msg    = document.createElement('div');
   msg.className = `msg ${role}`;
 
   const label  = document.createElement('div');
-  label.className = 'msg-label';
+  label.className   = 'msg-label';
   label.textContent = role === 'customer' ? 'You' : 'Priya';
 
   const bubble = document.createElement('div');
-  bubble.className = 'msg-bubble';
+  bubble.className   = 'msg-bubble';
   bubble.textContent = text;
 
   msg.appendChild(label);
@@ -85,203 +98,249 @@ function addMessage(role, text) {
   conversation.appendChild(msg);
   conversation.scrollTop = conversation.scrollHeight;
 
-  log('info', `Message added — role=${role} — "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`);
+  log('info', `Message — role=${role} — "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`);
 }
 
-// ── Start call ────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  START CALL
+// ══════════════════════════════════════════════════════════════════════════════
+
 btnStart.addEventListener('click', async () => {
-  log('info', 'Start button clicked — requesting microphone');
+  log('info', 'Start button clicked');
   btnStart.disabled = true;
 
+  // 1. Request microphone
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation : true,
-        noiseSuppression : true,
-        autoGainControl  : true,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl:  true,
       }
     });
     log('info', 'Microphone access granted');
   } catch (err) {
-    log('error', `Microphone access denied — ${err.message}`);
+    log('error', `Microphone denied — ${err.message}`);
     alert('Microphone access denied. Please allow microphone access and try again.');
     btnStart.disabled = false;
     return;
   }
 
-  // Set up Web Audio API
-  audioCtx  = new AudioContext({ sampleRate: 16000 });
-  analyser  = audioCtx.createAnalyser();
+  // 2. Web Audio API — analyser node for visualizer bars only
+  audioCtx = new AudioContext({ sampleRate: 16000 });
+  analyser = audioCtx.createAnalyser();
   analyser.fftSize = 256;
   const source = audioCtx.createMediaStreamSource(mediaStream);
   source.connect(analyser);
-  log('debug', `AudioContext created — sampleRate=${audioCtx.sampleRate}Hz`);
+  log('debug', `AudioContext ready — sampleRate=${audioCtx.sampleRate}Hz`);
 
-  // Connect to WebSocket
-  log('info', `Connecting to WebSocket — ${WS_URL}`);
+  // 3. Open WebSocket
+  log('info', `Connecting WebSocket — ${WS_URL}`);
   ws = new WebSocket(WS_URL);
-  ws.binaryType = 'arraybuffer';
 
   ws.onopen = () => {
     log('info', 'WebSocket connected');
     btnEnd.disabled = false;
     setStatus('active', 'Connected');
-    sessionInfo.innerHTML = `session — <span>connecting...</span>`;
+    sessionInfo.innerHTML = `session — <span>connecting…</span>`;
     startVolumeLoop();
+    initVAD();   // start VAD once WS is open
   };
 
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
-    log('debug', `WebSocket message received — type=${msg.type}`);
+    log('debug', `WS message — type=${msg.type}`);
     handleServerMessage(msg);
   };
 
   ws.onclose = (event) => {
-    log('info', `WebSocket closed — code=${event.code} reason="${event.reason || 'none'}"`);
+    log('info', `WebSocket closed — code=${event.code}`);
     setStatus('idle', 'Idle');
+    setVadStatus('', 'vad inactive');
     btnStart.disabled = false;
     btnEnd.disabled   = true;
-    stopRecording();
     stopVolumeLoop();
+    destroyVAD();
   };
 
   ws.onerror = (err) => {
-    log('error', `WebSocket error — ${err.message || 'unknown error'}`);
+    log('error', `WebSocket error — ${err.message || 'unknown'}`);
   };
 });
 
-// ── End call ──────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  END CALL
+// ══════════════════════════════════════════════════════════════════════════════
+
 btnEnd.addEventListener('click', () => {
   log('info', 'End button clicked — closing WebSocket');
   if (ws) ws.close();
 });
 
-// ── Handle server messages ────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  VAD — @ricky0123/vad-web (Silero ML model)
+//
+//  Replaces MediaRecorder + silence timer entirely.
+//
+//  onSpeechStart:
+//    Agent speaking  → barge-in: clear queue + send interrupt to server
+//    Agent silent    → update UI to show listening state
+//
+//  onSpeechEnd(audio):
+//    audio = Float32Array (16kHz mono, range -1..1) — full speech segment
+//    Convert Float32 → int16 PCM → WAV header → base64 → send to server
+//
+//  onVADMisfire:
+//    Silero detected something too short — noise, breath, cough. Ignored.
+// ══════════════════════════════════════════════════════════════════════════════
+
+async function initVAD() {
+  log('info', 'Initialising VAD…');
+  setVadStatus('', 'vad loading…');
+
+  try {
+    vad = await vad.MicVAD.new({
+      stream: mediaStream,
+
+      // Silero model thresholds
+      positiveSpeechThreshold: 0.6,    // confidence above this = speech
+      negativeSpeechThreshold: 0.35,   // confidence below this = silence
+      minSpeechFrames:         3,      // minimum frames before onSpeechStart fires
+      redemptionFrames:        8,      // frames of silence before onSpeechEnd fires
+
+      onSpeechStart: () => {
+        log('info', 'VAD — speech start');
+
+        if (isAgentSpeaking || isPlayingAudio) {
+          // ── Barge-in ──────────────────────────────────────────────────────
+          log('info', 'Barge-in — agent interrupted by customer');
+          setVadStatus('barge', 'barge-in detected');
+          triggerBargeIn();
+        } else {
+          // ── Normal listening ──────────────────────────────────────────────
+          setVadStatus('speech', 'speech detected');
+          setStatus('active', 'Listening');
+        }
+      },
+
+      onSpeechEnd: (audio) => {
+        // audio = Float32Array — complete speech segment from Silero
+        log('info', `VAD — speech end — ${audio.length} samples (${(audio.length / 16000).toFixed(2)}s)`);
+
+        if (isAgentSpeaking || isPlayingAudio) {
+          // barge-in was already handled in onSpeechStart — discard this audio
+          log('debug', 'onSpeechEnd discarded — barge-in already sent');
+          setVadStatus('', 'vad listening');
+          return;
+        }
+
+        setVadStatus('', 'vad listening');
+        setStatus('thinking', 'Thinking');
+
+        // Float32Array → 16-bit PCM → WAV → base64 → send
+        const wavBuffer = float32ToWav(audio);
+        const base64    = arrayBufferToBase64(wavBuffer);
+
+        wsSend({ type: 'audio_chunk', data: base64 });
+        wsSend({ type: 'audio_end' });
+        log('info', `Sent audio_chunk + audio_end — wav=${(wavBuffer.byteLength / 1024).toFixed(1)}KB`);
+      },
+
+      onVADMisfire: () => {
+        // Too short to be real speech — noise/breath/cough — safely ignored
+        log('debug', 'VAD misfire — ignored');
+        setVadStatus('', 'vad listening');
+      },
+    });
+
+    await vad.start();
+    setVadStatus('', 'vad listening');
+    log('info', 'VAD started and listening');
+
+  } catch (err) {
+    log('error', `VAD init failed — ${err.message}`);
+    setVadStatus('error', 'vad error');
+  }
+}
+
+async function destroyVAD() {
+  if (vad) {
+    try {
+      await vad.destroy();
+      log('info', 'VAD destroyed');
+    } catch (e) {
+      log('warn', `VAD destroy error — ${e.message}`);
+    }
+    vad = null;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  SERVER MESSAGE HANDLER
+// ══════════════════════════════════════════════════════════════════════════════
+
 function handleServerMessage(msg) {
   switch (msg.type) {
 
     case 'session_id':
       sessionId = msg.session_id;
       sessionInfo.innerHTML = `session — <span>${sessionId}</span>`;
-      log('info', `Session ID assigned — ${sessionId}`);
+      log('info', `Session ID — ${sessionId}`);
       break;
 
     case 'listening':
-      log('info', 'Server ready — starting recording');
+      // Server is ready — VAD is already running continuously, just update UI
+      log('info', 'Server ready — VAD already listening');
       isAgentSpeaking = false;
       setStatus('active', 'Listening');
-      if (!isPlayingAudio) {
-        startRecording();   // ← only starts if nothing is playing
-      }
-      // if isPlayingAudio=true, playNextChunk() will send "ready"
-      // server responds with "listening" → hits this case again
-      // by then isPlayingAudio=false → startRecording() runs
       break;
 
     case 'transcript':
-      log('info', `Transcript received — "${msg.text}"`);
+      log('info', `Transcript — "${msg.text}"`);
       addMessage('customer', msg.text);
-      stopRecording();
       setStatus('thinking', 'Thinking');
       break;
 
-    case 'audio_chunk':
-      const binary  = atob(msg.data);
-      const bytes   = new Uint8Array(binary.length);
+    case 'audio_chunk': {
+      // Cartesia sends raw PCM (pcm_s16le, 16kHz mono) — wrap in WAV header
+      const binary = atob(msg.data);
+      const bytes  = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
-      // Raw PCM from Cartesia — wrap in WAV header before decoding
       const wavBuffer = buildWavBuffer(bytes.buffer);
-      log('debug', `Audio chunk — pcm=${(bytes.length / 1024).toFixed(1)}KB — wav=${(wavBuffer.byteLength / 1024).toFixed(1)}KB — queue=${agentAudioQueue.length}`);
+      log('debug', `Audio chunk — pcm=${(bytes.length / 1024).toFixed(1)}KB — queue=${agentAudioQueue.length}`);
 
       agentAudioQueue.push(wavBuffer);
-      log('debug', `Audio chunk queued — size=${(bytes.length / 1024).toFixed(1)}KB — queue=${agentAudioQueue.length}`);
       if (!isPlayingAudio) playNextChunk();
       break;
+    }
 
     case 'audio_end':
-      log('info', 'Audio end received — agent finished speaking');
+      log('info', 'audio_end — agent finished speaking');
       isAgentSpeaking = false;
       break;
 
     case 'reply_text':
-      log('info', `Reply text received — "${msg.text.substring(0, 60)}${msg.text.length > 60 ? '...' : ''}"`);
+      log('info', `Reply — "${msg.text.substring(0, 60)}…"`);
       addMessage('agent', msg.text);
       break;
 
     default:
-      log('warn', `Unknown message type received — ${msg.type}`);
+      log('warn', `Unknown message type — ${msg.type}`);
   }
 }
 
-// ── Audio recording ───────────────────────────────────────────────────────────
-function startRecording() {
-  if (isRecording || !mediaStream) {
-    log('debug', `startRecording() skipped — isRecording=${isRecording} mediaStream=${!!mediaStream}`);
-    return;
-  }
-  isRecording = true;
-  log('info', 'Recording started');
+// ══════════════════════════════════════════════════════════════════════════════
+//  AUDIO PLAYBACK
+// ══════════════════════════════════════════════════════════════════════════════
 
-  const chunks = [];
-
-  mediaRecorder = new MediaRecorder(mediaStream, { mimeType: 'audio/webm;codecs=opus' });
-
-  mediaRecorder.ondataavailable = (e) => {
-    if (e.data.size > 0) {
-      chunks.push(e.data);
-      log('debug', `Audio data available — chunk size=${(e.data.size / 1024).toFixed(1)}KB — total chunks=${chunks.length}`);
-    }
-  };
-
-  mediaRecorder.onstop = () => {
-    log('info', `Recording stopped — building blob from ${chunks.length} chunks`);
-    const blob   = new Blob(chunks, { type: 'audio/webm;codecs=opus' });
-    log('info', `Blob created — size=${(blob.size / 1024).toFixed(1)}KB — sending to server`);
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result.split(',')[1];
-      wsSend({ type: 'audio_chunk', data: base64 });
-      wsSend({ type: 'audio_end' });
-      log('info', 'audio_chunk + audio_end sent to server');
-    };
-    reader.readAsDataURL(blob);
-  };
-
-  mediaRecorder.start();
-  resetSilenceTimer();
-}
-
-function stopRecording() {
-  if (!isRecording) {
-    log('debug', 'stopRecording() called but not recording — skipped');
-    return;
-  }
-  isRecording = false;
-  clearTimeout(silenceTimer);
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    log('info', 'Stopping MediaRecorder');
-    mediaRecorder.stop();
-  }
-}
-
-function resetSilenceTimer() {
-  clearTimeout(silenceTimer);
-  silenceTimer = setTimeout(() => {
-    if (isRecording) {
-      log('info', `Silence timeout reached (${SILENCE_TIMEOUT}ms) — stopping recording`);
-      stopRecording();
-    }
-  }, SILENCE_TIMEOUT);
-}
-
-// ── Audio playback ────────────────────────────────────────────────────────────
 async function playNextChunk() {
   if (agentAudioQueue.length === 0) {
-    log('debug', 'Audio queue empty — playback complete');
+    log('debug', 'Queue empty — playback complete');
     isPlayingAudio  = false;
     isAgentSpeaking = false;
-    wsSend({ type: 'ready' });   // ← tells server browser finished playing
+    wsSend({ type: 'ready' });
+    setStatus('active', 'Listening');
     return;
   }
 
@@ -289,95 +348,64 @@ async function playNextChunk() {
   isAgentSpeaking = true;
   setStatus('speaking', 'Speaking');
 
-  bargeMuteUntil = Date.now() + BARGE_MUTE_MS;
-  bargeStartTime = null;
-
   const buffer = agentAudioQueue.shift();
-  log('debug', `Playing audio chunk — size=${(buffer.byteLength / 1024).toFixed(1)}KB — remaining in queue=${agentAudioQueue.length}`);
-
-  // Inspect raw bytes before decode attempt
-  const view = new DataView(buffer);
-  const firstBytes = [];
-  for (let i = 0; i < Math.min(16, buffer.byteLength); i++) {
-    firstBytes.push(view.getUint8(i).toString(16).padStart(2, '0'));
-  }
-  log('debug', `buffer inspect — size: ${buffer.byteLength} bytes | first 16 bytes: ${firstBytes.join(' ')}`);
+  log('debug', `Playing — ${(buffer.byteLength / 1024).toFixed(1)}KB — queue=${agentAudioQueue.length}`);
 
   try {
     const decoded = await audioCtx.decodeAudioData(buffer);
-    log('debug', `Audio decoded — duration=${decoded.duration.toFixed(2)}s`);
-    const source  = audioCtx.createBufferSource();
-    source.buffer = decoded;
-    source.connect(audioCtx.destination);
-    source.onended = () => {
-      log('debug', 'Audio chunk playback ended — moving to next');
-      playNextChunk();
-    };
-    source.start();
+    const src     = audioCtx.createBufferSource();
+    src.buffer    = decoded;
+    src.connect(audioCtx.destination);
+    src.onended   = () => playNextChunk();
+    src.start();
+    log('debug', `Playing — duration=${decoded.duration.toFixed(2)}s`);
   } catch (err) {
     log('error', `Audio decode error — ${err.message}`);
-    playNextChunk();
+    playNextChunk();   // skip bad chunk, continue queue
   }
 }
 
 function clearAudioQueue() {
-  const cleared = agentAudioQueue.length;
+  const n = agentAudioQueue.length;
   agentAudioQueue = [];
   isPlayingAudio  = false;
   isAgentSpeaking = false;
-  log('info', `Audio queue cleared — ${cleared} chunks discarded`);
+  log('info', `Audio queue cleared — ${n} chunks discarded`);
 }
 
-// ── Volume monitor + barge-in ─────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+//  BARGE-IN
+// ══════════════════════════════════════════════════════════════════════════════
+
+function triggerBargeIn() {
+  clearAudioQueue();
+  wsSend({ type: 'interrupt' });
+  setStatus('active', 'Listening');
+  log('info', 'Barge-in: queue cleared + interrupt sent to server');
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  VISUALIZER — analyser node drives bars only, no barge-in logic here
+// ══════════════════════════════════════════════════════════════════════════════
+
 function startVolumeLoop() {
-  log('info', 'Volume monitoring loop started');
   const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
   function loop() {
     animFrameId = requestAnimationFrame(loop);
     analyser.getByteFrequencyData(dataArray);
-
-    let sum = 0;
-    for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-    const avg = sum / dataArray.length;
-
     updateBars(dataArray);
-
-    if (isAgentSpeaking) {
-      const now = Date.now();
-
-      if (now < bargeMuteUntil) return;
-
-      if (avg < VOLUME_THRESHOLD) {
-        bargeStartTime = null;
-        return;
-      }
-
-      if (!bargeStartTime) {
-        log('debug', `Barge-in voice detected — volume=${avg.toFixed(1)} — waiting for sustain (${BARGE_MIN_MS}ms)`);
-        bargeStartTime = now;
-        return;
-      }
-
-      if (now - bargeStartTime >= BARGE_MIN_MS) {
-        log('info', `Barge-in sustained for ${BARGE_MIN_MS}ms — triggering interrupt`);
-        triggerBargeIn();
-      }
-    } else {
-      if (isRecording && avg > VOLUME_THRESHOLD) {
-        resetSilenceTimer();
-      }
-    }
   }
 
   loop();
+  log('info', 'Volume loop started');
 }
 
 function stopVolumeLoop() {
   if (animFrameId) {
     cancelAnimationFrame(animFrameId);
     animFrameId = null;
-    log('info', 'Volume monitoring loop stopped');
+    log('info', 'Volume loop stopped');
   }
 }
 
@@ -387,81 +415,109 @@ function updateBars(dataArray) {
     const val    = dataArray[i * step] || 0;
     const height = Math.max(4, (val / 255) * 28);
     bar.style.height = `${height}px`;
-    bar.classList.toggle('active', val > VOLUME_THRESHOLD * 2);
+    bar.classList.toggle('active', val > VOLUME_THRESH * 2);
   });
 }
 
-function triggerBargeIn() {
-  log('info', 'Barge-in triggered — sending interrupt to server');
-  bargeStartTime = null;
-  bargeMuteUntil = 0;
-  clearAudioQueue();
-  stopRecording();
-  wsSend({ type: 'interrupt' });
-  setStatus('active', 'Listening');
-}
+// ══════════════════════════════════════════════════════════════════════════════
+//  AUDIO CONVERSION HELPERS
+// ══════════════════════════════════════════════════════════════════════════════
 
-// ── WebSocket send ────────────────────────────────────────────────────────────
-function wsSend(data) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    // Don't log audio_chunk — too noisy (large base64 payload)
-    if (data.type !== 'audio_chunk') {
-      log('debug', `WebSocket send — type=${data.type}`);
-    }
-    ws.send(JSON.stringify(data));
-  } else {
-    log('warn', `wsSend() failed — WebSocket not open — type=${data.type} readyState=${ws?.readyState}`);
-  }
-}
+/**
+ * float32ToWav
+ * Converts Silero's Float32Array output (-1..1, 16kHz mono)
+ * into a complete WAV ArrayBuffer ready to send to the server.
+ */
+function float32ToWav(float32Array) {
+  const numSamples  = float32Array.length;
+  const sampleRate  = 16000;
+  const numChannels = 1;
+  const bitDepth    = 16;
+  const byteRate    = sampleRate * numChannels * bitDepth / 8;
+  const blockAlign  = numChannels * bitDepth / 8;
+  const dataSize    = numSamples * blockAlign;
+  const buffer      = new ArrayBuffer(44 + dataSize);
+  const view        = new DataView(buffer);
 
-
-// ── WAV header builder ────────────────────────────────────────────────────────
-// Cartesia WebSocket sends raw PCM (pcm_s16le, 16000Hz, mono).
-// decodeAudioData() needs a proper WAV container — so we build the header here.
-function buildWavBuffer(pcmBuffer) {
-  const numChannels  = 1;       // mono
-  const sampleRate   = 16000;   // 16kHz — must match Cartesia output_format
-  const bitsPerSample = 16;     // pcm_s16le
-  const byteRate     = sampleRate * numChannels * bitsPerSample / 8;
-  const blockAlign   = numChannels * bitsPerSample / 8;
-  const dataSize     = pcmBuffer.byteLength;
-  const headerSize   = 44;
-  const totalSize    = headerSize + dataSize;
-
-  const wav    = new ArrayBuffer(totalSize);
-  const view   = new DataView(wav);
-
-  // RIFF chunk
   writeString(view, 0,  'RIFF');
-  view.setUint32(4,  totalSize - 8,  true);  // file size minus RIFF header
+  view.setUint32(4,  buffer.byteLength - 8, true);
   writeString(view, 8,  'WAVE');
-
-  // fmt chunk
   writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16,           true);   // chunk size = 16 for PCM
-  view.setUint16(20, 1,            true);   // audio format = 1 (PCM)
+  view.setUint32(16, 16,           true);
+  view.setUint16(20, 1,            true);   // PCM
   view.setUint16(22, numChannels,  true);
   view.setUint32(24, sampleRate,   true);
   view.setUint32(28, byteRate,     true);
   view.setUint16(32, blockAlign,   true);
-  view.setUint16(34, bitsPerSample,true);
-
-  // data chunk
+  view.setUint16(34, bitDepth,     true);
   writeString(view, 36, 'data');
   view.setUint32(40, dataSize, true);
 
-  // Copy raw PCM bytes after the header
-  new Uint8Array(wav, headerSize).set(new Uint8Array(pcmBuffer));
+  // Float32 → Int16
+  const pcm = new Int16Array(buffer, 44);
+  for (let i = 0; i < numSamples; i++) {
+    const s = Math.max(-1, Math.min(1, float32Array[i]));
+    pcm[i]  = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  }
 
-   // ── Temporary size check ──
-  console.log('buildWavBuffer — pcmSize:', pcmBuffer.byteLength, 'wavSize:', wav.byteLength, 'diff:', wav.byteLength - pcmBuffer.byteLength);
+  return buffer;
+}
 
+/**
+ * buildWavBuffer
+ * Wraps raw PCM bytes from Cartesia Sonic (pcm_s16le, 16kHz mono)
+ * in a WAV header so decodeAudioData() can play them.
+ */
+function buildWavBuffer(pcmBuffer) {
+  const sampleRate    = 16000;
+  const numChannels   = 1;
+  const bitsPerSample = 16;
+  const byteRate      = sampleRate * numChannels * bitsPerSample / 8;
+  const blockAlign    = numChannels * bitsPerSample / 8;
+  const dataSize      = pcmBuffer.byteLength;
+  const wav           = new ArrayBuffer(44 + dataSize);
+  const view          = new DataView(wav);
 
+  writeString(view, 0,  'RIFF');
+  view.setUint32(4,  wav.byteLength - 8, true);
+  writeString(view, 8,  'WAVE');
+  writeString(view, 12, 'fmt ');
+  view.setUint32(16, 16,            true);
+  view.setUint16(20, 1,             true);
+  view.setUint16(22, numChannels,   true);
+  view.setUint32(24, sampleRate,    true);
+  view.setUint32(28, byteRate,      true);
+  view.setUint16(32, blockAlign,    true);
+  view.setUint16(34, bitsPerSample, true);
+  writeString(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  new Uint8Array(wav, 44).set(new Uint8Array(pcmBuffer));
   return wav;
 }
 
 function writeString(view, offset, str) {
   for (let i = 0; i < str.length; i++) {
     view.setUint8(offset + i, str.charCodeAt(i));
+  }
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let   bin   = '';
+  for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  WEBSOCKET SEND
+// ══════════════════════════════════════════════════════════════════════════════
+
+function wsSend(data) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    if (data.type !== 'audio_chunk') log('debug', `WS send — type=${data.type}`);
+    ws.send(JSON.stringify(data));
+  } else {
+    log('warn', `wsSend failed — WS not open — type=${data.type}`);
   }
 }
