@@ -20,10 +20,12 @@ let isRecording     = false;
 let isAgentSpeaking = false;
 let agentAudioQueue = [];
 let isPlayingAudio  = false;
+let isFirstAgentChunk = false;   
 
 let silenceTimer    = null;
 let bargeStartTime  = null;
 let bargeMuteUntil  = 0;
+let bargeSilenceFrames = 0;
 
 // ── Logger ────────────────────────────────────────────────────────────────────
 // Centralised logger — prefix every log with timestamp and session ID
@@ -196,12 +198,14 @@ function handleServerMessage(msg) {
 
       agentAudioQueue.push(wavBuffer);
       log('debug', `Audio chunk queued — size=${(bytes.length / 1024).toFixed(1)}KB — queue=${agentAudioQueue.length}`);
-      if (!isPlayingAudio) playNextChunk();
+      if (!isPlayingAudio){
+        isFirstAgentChunk = true; 
+        playNextChunk();
+      } 
       break;
 
     case 'audio_end':
       log('info', 'Audio end received — agent finished speaking');
-      isAgentSpeaking = false;
       break;
 
     case 'reply_text':
@@ -289,8 +293,12 @@ async function playNextChunk() {
   isAgentSpeaking = true;
   setStatus('speaking', 'Speaking');
 
-  bargeMuteUntil = Date.now() + BARGE_MUTE_MS;
-  bargeStartTime = null;
+  if (isFirstAgentChunk) {
+    bargeMuteUntil    = Date.now() + BARGE_MUTE_MS;  // ← only set once
+    bargeStartTime    = null;                          // ← reset sustain
+    isFirstAgentChunk = false;                         // ← never set again this turn
+    bargeSilenceFrames = 0;
+  }
 
   const buffer = agentAudioQueue.shift();
   log('debug', `Playing audio chunk — size=${(buffer.byteLength / 1024).toFixed(1)}KB — remaining in queue=${agentAudioQueue.length}`);
@@ -349,9 +357,17 @@ function startVolumeLoop() {
       if (now < bargeMuteUntil) return;
 
       if (avg < VOLUME_THRESHOLD) {
-        bargeStartTime = null;
+        if (bargeStartTime !== null) {
+          bargeSilenceFrames++;
+          if (bargeSilenceFrames > 5) {
+            bargeStartTime     = null;
+            bargeSilenceFrames = 0;
+            log('debug', 'Barge-in sustain reset — silence exceeded tolerance');
+          }
+        }
         return;
       }
+      bargeSilenceFrames = 0;
 
       if (!bargeStartTime) {
         log('debug', `Barge-in voice detected — volume=${avg.toFixed(1)} — waiting for sustain (${BARGE_MIN_MS}ms)`);
@@ -395,6 +411,7 @@ function triggerBargeIn() {
   log('info', 'Barge-in triggered — sending interrupt to server');
   bargeStartTime = null;
   bargeMuteUntil = 0;
+  bargeSilenceFrames = 0; 
   clearAudioQueue();
   stopRecording();
   wsSend({ type: 'interrupt' });
