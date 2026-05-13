@@ -16,7 +16,7 @@ let mediaStream     = null;
 let audioCtx        = null;
 let analyser        = null;
 let animFrameId     = null;
-let vad             = null;        // @ricky0123/vad-web MicVAD instance
+let vadInstance     = null;        // @ricky0123/vad-web MicVAD instance
 
 let isAgentSpeaking = false;
 let isPlayingAudio  = false;
@@ -113,9 +113,13 @@ btnStart.addEventListener('click', async () => {
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl:  true,
+        echoCancellation    : true,
+        noiseSuppression    : true,
+        autoGainControl     : true,
+        channelCount        : 1,
+        sampleRate          : 16000,
+        googNoiseSuppression: true,
+        googHighpassFilter  : true,
       }
     });
     log('info', 'Microphone access granted');
@@ -199,61 +203,52 @@ async function initVAD() {
   setVadStatus('', 'vad loading…');
 
   try {
-    vad = await vad.MicVAD.new({
-      stream: mediaStream,
+    vadInstance = await vad.MicVAD.new({
+      onnxWASMBasePath : 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/',
+      baseAssetPath    : 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/',
+      stream           : mediaStream,
 
-      // Silero model thresholds
-      positiveSpeechThreshold: 0.6,    // confidence above this = speech
-      negativeSpeechThreshold: 0.35,   // confidence below this = silence
-      minSpeechFrames:         3,      // minimum frames before onSpeechStart fires
-      redemptionFrames:        8,      // frames of silence before onSpeechEnd fires
+      positiveSpeechThreshold : 0.8,
+      negativeSpeechThreshold : 0.6,
+      minSpeechFrames         : 5,
+      redemptionFrames        : 6,
+      preSpeechPadFrames      : 3,
 
       onSpeechStart: () => {
         log('info', 'VAD — speech start');
-
         if (isAgentSpeaking || isPlayingAudio) {
-          // ── Barge-in ──────────────────────────────────────────────────────
           log('info', 'Barge-in — agent interrupted by customer');
           setVadStatus('barge', 'barge-in detected');
           triggerBargeIn();
         } else {
-          // ── Normal listening ──────────────────────────────────────────────
           setVadStatus('speech', 'speech detected');
           setStatus('active', 'Listening');
         }
       },
 
       onSpeechEnd: (audio) => {
-        // audio = Float32Array — complete speech segment from Silero
         log('info', `VAD — speech end — ${audio.length} samples (${(audio.length / 16000).toFixed(2)}s)`);
-
         if (isAgentSpeaking || isPlayingAudio) {
-          // barge-in was already handled in onSpeechStart — discard this audio
           log('debug', 'onSpeechEnd discarded — barge-in already sent');
           setVadStatus('', 'vad listening');
           return;
         }
-
         setVadStatus('', 'vad listening');
         setStatus('thinking', 'Thinking');
-
-        // Float32Array → 16-bit PCM → WAV → base64 → send
         const wavBuffer = float32ToWav(audio);
         const base64    = arrayBufferToBase64(wavBuffer);
-
         wsSend({ type: 'audio_chunk', data: base64 });
         wsSend({ type: 'audio_end' });
         log('info', `Sent audio_chunk + audio_end — wav=${(wavBuffer.byteLength / 1024).toFixed(1)}KB`);
       },
 
       onVADMisfire: () => {
-        // Too short to be real speech — noise/breath/cough — safely ignored
         log('debug', 'VAD misfire — ignored');
         setVadStatus('', 'vad listening');
       },
     });
 
-    await vad.start();
+    await vadInstance.start();
     setVadStatus('', 'vad listening');
     log('info', 'VAD started and listening');
 
@@ -264,14 +259,14 @@ async function initVAD() {
 }
 
 async function destroyVAD() {
-  if (vad) {
+  if (vadInstance) {
     try {
-      await vad.destroy();
+      await vadInstance.destroy();
       log('info', 'VAD destroyed');
     } catch (e) {
       log('warn', `VAD destroy error — ${e.message}`);
     }
-    vad = null;
+    vadInstance = null;
   }
 }
 
