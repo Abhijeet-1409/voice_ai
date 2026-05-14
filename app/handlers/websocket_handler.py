@@ -2,14 +2,19 @@
 websocket_handler.py — Full WebSocket call lifecycle handler
 
 One handle_websocket() coroutine runs per active call.
-Each call gets its own CartesiaTTS instance (its own WebSocket to Cartesia).
+Each call gets its own CartesiaSTT and CartesiaTTS instance.
+
+STT: Cartesia Ink WebSocket — audio streamed in real time while customer speaks.
+     finalize() is called after VAD signals speech end — transcript ready instantly.
+TTS: Cartesia Sonic WebSocket — synthesizes sentence by sentence.
+
 Barge-in works by cancelling the speak_task asyncio.Task mid-stream.
 """
 
 import asyncio
 import base64
 import json
-import os
+import struct
 import time
 from enum import Enum
 
@@ -17,9 +22,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from models.db_models import Call, Exchange, SessionLocal
 from services.tts_service import CartesiaTTS
-from services import stt_service
+from services.stt_service import CartesiaSTT
 from services.llm_service import stream_reply
-from utils.audio_utils import webm_to_wav
 from utils.email_utils import send_email_notification
 from utils.logger import ws_logger, db_logger
 from utils.session_store import (
@@ -34,7 +38,7 @@ from utils.session_store import (
 
 class CallState(Enum):
     LISTENING  = "listening"   # waiting for customer to speak
-    PROCESSING = "processing"  # STT + RAG + LLM running
+    PROCESSING = "processing"  # STT finalize + RAG + LLM running
     SPEAKING   = "speaking"    # TTS streaming to browser
 
 
@@ -54,13 +58,28 @@ class CallContext:
         self._state = value
 
 
+# ── PCM conversion helper ─────────────────────────────────────────────────────
+
+def float32_to_pcm16(wav_base64: str) -> bytes:
+    """
+    Convert base64-encoded WAV (from VAD float32ToWav) back to raw int16 PCM bytes.
+    Strips the 44-byte WAV header — Cartesia STT needs raw pcm_s16le.
+
+    The browser's float32ToWav() wraps Float32→int16 PCM in a WAV container.
+    We strip that header here so Cartesia receives pure PCM bytes.
+    """
+    wav_bytes = base64.b64decode(wav_base64)
+    # WAV header is always 44 bytes — PCM data starts at byte 44
+    return wav_bytes[44:]
+
+
 # ── Main handler ──────────────────────────────────────────────────────────────
 
 async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
     """
     Main WebSocket handler — manages the full lifecycle of one customer call.
 
-    One CartesiaTTS instance is created here and lives for the entire call.
+    One CartesiaSTT and one CartesiaTTS instance live for the entire call.
     speak_task holds the current _process_exchange Task so it can be
     cancelled instantly when the customer interrupts (barge-in).
 
@@ -68,16 +87,17 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
         websocket:  FastAPI WebSocket connection
         session_id: Unique session ID — already created in Redis by main.py
     """
-    ctx        = CallContext()     # manages LISTENING vs PROCESSING vs SPEAKING state
-    audio_buffer = bytearray()   # accumulates WebM chunks during one utterance
-    speak_task   = None          # currently running _process_exchange Task
+    ctx          = CallContext()
+    speak_task   = None
 
     ws_logger.info(f"[{session_id}] Call started — WebSocket connected")
 
-    # ── One Cartesia TTS connection per call ──────────────────────────────────
+    # ── One STT + one TTS connection per call ─────────────────────────────────
+    stt = CartesiaSTT()
     tts = CartesiaTTS()
+
+    await stt.connect(session_id)
     await tts.connect(session_id)
-    ws_logger.debug(f"[{session_id}] Cartesia TTS connected")
 
     try:
         # Tell browser we are ready
@@ -89,50 +109,47 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
             msg      = json.loads(raw)
             msg_type = msg.get("type")
 
-            # ── audio_chunk — browser sending mic audio ────────────────────
+            # ── audio_chunk — VAD sending PCM while customer speaks ─────────
             if msg_type == "audio_chunk":
                 if ctx.state == CallState.LISTENING:
-                    chunk_bytes = base64.b64decode(msg["data"])
-                    audio_buffer.extend(chunk_bytes)
-                    ws_logger.info(f"[{session_id}] Audio chunk received — buffer: {len(audio_buffer) / 1024:.1f}KB")
+                    # Strip WAV header → raw PCM → stream to Cartesia STT
+                    pcm_bytes = float32_to_pcm16(msg["data"])
+                    await stt.send_audio(pcm_bytes, session_id=session_id)
+                    ws_logger.debug(f"[{session_id}] PCM streamed to STT — {len(pcm_bytes) / 1024:.1f}KB")
 
-            # ── audio_end — customer finished speaking ─────────────────────
+            # ── audio_end — VAD says customer finished speaking ────────────
             elif msg_type == "audio_end":
-                if ctx.state == CallState.LISTENING and len(audio_buffer) > 0:
-                    ws_logger.info(f"[{session_id}] Audio end received — buffer: {len(audio_buffer) / 1024:.1f}KB — starting processing")
+                if ctx.state == CallState.LISTENING:
+                    ws_logger.info(f"[{session_id}] Audio end — starting processing")
                     ctx.state = CallState.PROCESSING
 
-                    # Run the full STT → LLM → TTS pipeline as a cancellable Task
                     speak_task = asyncio.create_task(
                         _process_exchange(
                             websocket  = websocket,
                             session_id = session_id,
-                            webm_bytes = bytes(audio_buffer),
+                            stt        = stt,
                             tts        = tts,
                             ctx        = ctx,
                         )
                     )
-                    audio_buffer.clear()
 
                     try:
                         await speak_task
                     except asyncio.CancelledError:
-                        # Barge-in cancelled this task — that is expected
                         ws_logger.info(f"[{session_id}] speak_task cancelled — barge-in")
 
+            # ── ready — browser finished playing all audio chunks ──────────
             elif msg_type == "ready":
                 if ctx.state == CallState.SPEAKING:
                     ctx.state = CallState.LISTENING
                     await _send(websocket, {"type": "listening"})
                     ws_logger.info(f"[{session_id}] Browser ready — transitioning to LISTENING")
 
-            # ── interrupt — customer spoke during agent audio ───────────────
+            # ── interrupt — barge-in, customer spoke over agent ────────────
             elif msg_type == "interrupt":
                 ws_logger.info(f"[{session_id}] Barge-in triggered — cancelling agent speech")
-                audio_buffer.clear()
                 ctx.state = CallState.LISTENING
 
-                # Cancel TTS streaming immediately
                 if speak_task and not speak_task.done():
                     speak_task.cancel()
                     try:
@@ -152,9 +169,9 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
         await _handle_call_end(session_id)
 
     finally:
-        # Always close the Cartesia TTS WebSocket when the call ends
+        await stt.close(session_id)
         await tts.close(session_id)
-        ws_logger.info(f"[{session_id}] Cartesia TTS connection closed")
+        ws_logger.info(f"[{session_id}] STT + TTS connections closed")
 
 
 # ── Process one exchange ──────────────────────────────────────────────────────
@@ -162,52 +179,46 @@ async def handle_websocket(websocket: WebSocket, session_id: str) -> None:
 async def _process_exchange(
     websocket  : WebSocket,
     session_id : str,
-    webm_bytes : bytes,
+    stt        : CartesiaSTT,
     tts        : CartesiaTTS,
     ctx        : CallContext,
 ) -> None:
     """
     Full pipeline for one customer utterance:
-      WebM bytes → STT → LLM (with RAG) → TTS sentence-by-sentence → browser
+      STT finalize → LLM (with RAG) → TTS sentence-by-sentence → browser
+
+    STT has already been processing audio in real time — finalize() just
+    flushes remaining audio and returns the final transcript instantly.
 
     This runs as an asyncio.Task so it can be cancelled mid-stream on barge-in.
-    asyncio.CancelledError propagates naturally — no special handling needed here.
-
-    Args:
-        websocket:  FastAPI WebSocket
-        session_id: Redis session key
-        webm_bytes: Complete WebM audio blob from browser
-        tts:        CartesiaTTS instance for this call
     """
-    wav_path   = None
     start_time = time.time()
-
     ws_logger.info(f"[{session_id}] _process_exchange started")
 
     try:
-        # ── Step 1: WebM → 16kHz mono WAV ─────────────────────────────────
-        wav_path = webm_to_wav(webm_bytes, session_id=session_id)
-
-        # ── Step 2: WAV → transcript ───────────────────────────────────────
-        transcript = await stt_service.transcribe(wav_path, session_id=session_id)
+        # ── Step 1: Finalize STT — get transcript ──────────────────────────
+        # Audio was already streamed in real time — this just flushes remainder
+        transcript = await stt.finalize(session_id=session_id)
 
         if not transcript.strip():
             ws_logger.warning(f"[{session_id}] Empty transcript — skipping exchange")
+            ctx.state = CallState.LISTENING
+            await _send(websocket, {"type": "listening"})
             return
 
-        # ── Step 3: Send transcript to browser ────────────────────────────
+        # ── Step 2: Send transcript to browser ────────────────────────────
         await _send(websocket, {"type": "transcript", "text": transcript})
         ws_logger.info(f"[{session_id}] Transcript sent to browser")
 
-        # ── Step 4: Get conversation history from Redis ────────────────────
+        # ── Step 3: Get conversation history from Redis ────────────────────
         session = get_session(session_id)
         history = session.get("exchanges", []) if session else []
         ws_logger.info(f"[{session_id}] History loaded — {len(history)} exchanges")
 
-        # ── Step 5: Stream LLM reply sentence by sentence ─────────────────
-        extracted_info  = {}
-        full_reply      = []
-        sentence_count  = 0
+        # ── Step 4: Stream LLM reply sentence by sentence ─────────────────
+        extracted_info = {}
+        full_reply     = []
+        sentence_count = 0
 
         async for sentence in stream_reply(transcript, history, extracted_info, session_id=session_id):
             full_reply.append(sentence)
@@ -217,27 +228,27 @@ async def _process_exchange(
             if ctx.state == CallState.PROCESSING:
                 ctx.state = CallState.SPEAKING
 
-            # ── Step 6: Synthesize sentence → PCM bytes ────────────────────
+            # ── Step 5: Synthesize sentence → PCM bytes ────────────────────
             audio_chunks = bytearray()
             async for pcm_chunk in tts.synthesize(sentence, session_id=session_id):
                 audio_chunks.extend(pcm_chunk)
 
             if audio_chunks:
-                # ── Step 7: Send audio to browser ──────────────────────────
+                # ── Step 6: Send audio to browser ──────────────────────────
                 await _send(websocket, {
                     "type": "audio_chunk",
                     "data": base64.b64encode(bytes(audio_chunks)).decode("utf-8"),
                 })
                 ws_logger.info(f"[{session_id}] Audio chunk sent — sentence {sentence_count} — {len(audio_chunks) / 1024:.1f}KB")
 
-        # ── Step 8: Signal agent finished speaking ─────────────────────────
+        # ── Step 7: Signal agent finished speaking ─────────────────────────
         await _send(websocket, {"type": "audio_end"})
 
-        # ── Step 9: Send full reply text for display ───────────────────────
+        # ── Step 8: Send full reply text for display ───────────────────────
         agent_reply = " ".join(full_reply)
         await _send(websocket, {"type": "reply_text", "text": agent_reply})
 
-        # ── Step 10: Save exchange to Redis ────────────────────────────────
+        # ── Step 9: Save exchange to Redis ─────────────────────────────────
         add_exchange(
             session_id     = session_id,
             caller_message = transcript,
@@ -247,15 +258,15 @@ async def _process_exchange(
 
         elapsed = time.time() - start_time
         ws_logger.info(f"[{session_id}] Exchange complete — {sentence_count} sentences — {elapsed:.2f}s total")
-    
+
+    except asyncio.CancelledError:
+        ws_logger.info(f"[{session_id}] Exchange cancelled mid-stream — barge-in")
+        raise   # re-raise so speak_task sees CancelledError
+
     except Exception as e:
         ws_logger.exception(f"[{session_id}] Exchange failed — {e}")
-
-    finally:
-        # Always clean up temp WAV file even if cancelled mid-stream
-        if wav_path and os.path.exists(wav_path):
-            os.unlink(wav_path)
-            ws_logger.info(f"[{session_id}] Temp WAV file cleaned up")
+        ctx.state = CallState.LISTENING
+        await _send(websocket, {"type": "listening"})
 
 
 # ── Call end ──────────────────────────────────────────────────────────────────
@@ -264,7 +275,6 @@ async def _handle_call_end(session_id: str) -> None:
     """
     Called on WebSocketDisconnect (or unexpected error).
     Saves full session to PostgreSQL, sends email, cleans up Redis.
-    All steps run independently — one failure does not skip the rest.
     """
     ws_logger.info(f"[{session_id}] Handling call end")
 
@@ -344,7 +354,7 @@ def _save_to_db(session: dict) -> None:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 async def _send(websocket: WebSocket, data: dict) -> None:
-    """Send JSON over WebSocket. Silently ignores errors (client may have disconnected)."""
+    """Send JSON over WebSocket. Silently ignores errors."""
     try:
         await websocket.send_text(json.dumps(data))
     except Exception as e:

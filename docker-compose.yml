@@ -35,10 +35,12 @@ services:
     # Build the image using app/ as the Docker build context.
     # Docker will look for app/Dockerfile and execute it from app/ folder.
     # All COPY commands in Dockerfile are relative to app/ as the root.
-    build: ./app
+    image: voice-ai:${APP_VERSION}
+
+    container_name: voice-ai-${APP_VERSION}
 
     ports:
-      - "8000:8000"
+      - "${APP_PORT}:8000"
 
     # Load environment variables from .env file at voice_ai/ root.
     # These become environment variables inside the container at runtime.
