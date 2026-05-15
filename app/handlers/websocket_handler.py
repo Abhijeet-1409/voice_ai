@@ -23,7 +23,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from models.db_models import Call, Exchange, SessionLocal
 from services.tts_service import CartesiaTTS
 from services.stt_service import CartesiaSTT,STTError
-from services.llm_service import stream_reply
+from services.llm_service import stream_reply,extract_info
 from utils.email_utils import send_email_notification
 from utils.logger import ws_logger, db_logger
 from utils.session_store import (
@@ -210,7 +210,6 @@ async def _process_exchange(
         ws_logger.info(f"[{session_id}] History loaded — {len(history)} exchanges")
 
         # ── Step 4: Stream LLM reply sentence by sentence ─────────────────
-        extracted_info = {}
         full_reply     = []
         sentence_count = 0
 
@@ -242,7 +241,10 @@ async def _process_exchange(
         agent_reply = " ".join(full_reply)
         await _send(websocket, {"type": "reply_text", "text": agent_reply})
 
-        # ── Step 9: Save exchange to Redis ─────────────────────────────────
+        # ── Step 9: Extract customer info from this exchange ───────────────
+        extracted_info = await extract_info(transcript, agent_reply, session_id=session_id)
+
+        # ── Step 10: Save exchange to Redis ────────────────────────────────
         add_exchange(
             session_id     = session_id,
             caller_message = transcript,

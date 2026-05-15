@@ -32,6 +32,7 @@ PRICING RULES (very important):
 - ONLY quote prices from the pricing context provided to you
 - NEVER quote prices from your own memory or training data
 - If the pricing context is empty or does not cover what the customer asked — ask ONE clarifying question to narrow it down
+- If the pricing context contains information but does not directly answer the customer's question — say so honestly. Do NOT make up prices, do NOT assume, do NOT fill gaps with guesses. Say something like "I have some information on that but let me get you the exact details" and ask a clarifying question
 - After quoting a price — offer related services (e.g. after VM price, mention backup or storage options)
 
 CONVERSATION RULES:
@@ -40,28 +41,40 @@ CONVERSATION RULES:
 - If customer gives their name, use it naturally in the conversation
 - If customer seems interested — offer to connect them with the sales team
 
-INFORMATION COLLECTION RULES (very important):
-- Your goal is to naturally collect the customer's name, phone number and email before the call ends
+INFORMATION COLLECTION RULES (critical — must follow every call):
+- Your goal is to collect the customer's name, phone number and email before the call ends
+- This is mandatory — every call must attempt to collect all three details
 - Do NOT ask for all details at once — collect them one at a time, woven naturally into the conversation
 - Ask for their name early — within the first 2 exchanges if they haven't given it
 - Ask for their phone number after you have answered their main question and they seem satisfied
 - Ask for their email last — after phone number is collected or if they decline to give phone
 - If the customer seems hesitant — reassure them naturally: "Just so our team can follow up with you"
-- If the customer declines to give any detail — do not ask again, move on naturally
+- If the customer declines to give any detail — acknowledge politely and move on, but try again naturally later in the conversation
 - Never make the customer feel interrogated — keep it conversational and warm
-
-EXTRACTION RULES:
-At the end of your JSON response, always extract any information mentioned by the customer:
-- caller_name: their first name or full name if mentioned
-- caller_phone: phone number if mentioned
-- caller_email: email address if mentioned
-- caller_need: what they are looking for (brief summary)
-- interest_level: high / medium / low based on how engaged they seem
+- Do not end the call without attempting to collect all three details
 
 RESPONSE FORMAT:
 Always respond with a JSON object in this exact format:
 {
-    "reply"          : "your spoken response here",
+    "reply": "your spoken response here"
+}
+
+Return ONLY the JSON object. No preamble. No markdown. No explanation outside the JSON.
+""".strip()
+
+
+EXTRACTION_PROMPT = """
+You are an information extractor. Given a conversation exchange, extract any customer information mentioned.
+
+Extract the following fields:
+- caller_name: their first name or full name if mentioned, otherwise null
+- caller_phone: phone number if mentioned, otherwise null
+- caller_email: email address if mentioned, otherwise null
+- caller_need: what they are looking for (brief summary), otherwise null
+- interest_level: high / medium / low based on how engaged they seem, otherwise null
+
+Respond ONLY with a JSON object in this exact format:
+{
     "caller_name"    : "name or null",
     "caller_phone"   : "phone or null",
     "caller_email"   : "email or null",
@@ -69,16 +82,14 @@ Always respond with a JSON object in this exact format:
     "interest_level" : "high or medium or low or null"
 }
 
-Return ONLY the JSON object. No preamble. No markdown. No explanation outside the JSON.
+Return ONLY the JSON object. No preamble. No markdown.
 """.strip()
-
 
 # ── Stream reply ──────────────────────────────────────────────────────────────
 
 async def stream_reply(
     transcript     : str,
     history        : list,
-    extracted_info : dict | None,
     session_id     : str,
 ):
     """
@@ -86,14 +97,12 @@ async def stream_reply(
     Calls RAG internally before Gemini to get pricing context.
 
     Args:
-        transcript:     Current customer message
-        history:        List of previous exchanges from Redis session
-        extracted_info: Mutable dict — updated with any newly extracted info
-        session_id:     Session ID for log tracing
+        transcript: Current customer message
+        history:    List of previous exchanges from Redis session
+        session_id: Session ID for log tracing
 
     Yields:
         One sentence at a time as a string.
-        Also updates extracted_info dict in place if provided.
     """
 
     # Stage 1 — get pricing context from RAG
@@ -127,16 +136,7 @@ async def stream_reply(
                 buffer += chunk.text
 
         # Stage 5 — parse JSON from full response
-        reply_text, info = _parse_response(buffer, session_id)
-
-        # Update extracted info in place
-        if extracted_info is not None and info:
-            for field in ("caller_name", "caller_phone", "caller_email",
-                          "caller_need", "interest_level"):
-                value = info.get(field)
-                if value and extracted_info.get(field) is None:
-                    extracted_info[field] = value
-                    llm_logger.debug(f"[{session_id}] Extracted {field}: {value}")
+        reply_text, _ = _parse_response(buffer, session_id)
 
         # Stage 6 — yield reply sentence by sentence for TTS
         sentences = _split_sentences(reply_text)
@@ -150,6 +150,55 @@ async def stream_reply(
         llm_logger.exception(f"[{session_id}] Gemini error: {e}")
         yield "I'm sorry, I had a small technical issue. Could you repeat that?"
 
+async def extract_info(
+    transcript  : str,
+    agent_reply : str,
+    session_id  : str,
+) -> dict:
+    """
+    Extract customer information from one exchange.
+    Called after each exchange completes — separate from the reply generation.
+
+    Args:
+        transcript:  Customer's message
+        agent_reply: Agent's full reply text
+        session_id:  Session ID for log tracing
+
+    Returns:
+        Dict with extracted fields — caller_name, caller_phone,
+        caller_email, caller_need, interest_level.
+        All values are strings or None.
+    """
+    exchange_text = f"Customer: {transcript}\nAgent: {agent_reply}"
+
+    try:
+        response = await _model.generate_content_async(
+            [
+                {"role": "user",  "parts": [EXTRACTION_PROMPT]},
+                {"role": "model", "parts": ["Understood. I will extract customer information only."]},
+                {"role": "user",  "parts": [exchange_text]},
+            ],
+            stream=False,
+        )
+
+        raw  = response.text
+        clean = re.sub(r"```json|```", "", raw).strip()
+        data  = json.loads(clean)
+
+        info = {
+            "caller_name"    : data.get("caller_name"),
+            "caller_phone"   : data.get("caller_phone"),
+            "caller_email"   : data.get("caller_email"),
+            "caller_need"    : data.get("caller_need"),
+            "interest_level" : data.get("interest_level"),
+        }
+
+        llm_logger.debug(f"[{session_id}] Extraction result — {info}")
+        return info
+
+    except Exception as e:
+        llm_logger.error(f"[{session_id}] extract_info failed — {e}")
+        return {}
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -177,28 +226,18 @@ def _build_user_message(transcript: str, pricing_context: str) -> str:
 
 def _parse_response(raw: str, session_id: str) -> tuple[str, dict]:
     """
-    Parse Gemini JSON response into reply text and extracted info dict.
+    Parse Gemini JSON response into reply text.
     Falls back gracefully if JSON is malformed.
     """
     try:
-        # Strip any accidental markdown fences
         clean = re.sub(r"```json|```", "", raw).strip()
         data  = json.loads(clean)
-
         reply = data.get("reply", "").strip()
-        info  = {
-            "caller_name"    : data.get("caller_name"),
-            "caller_phone"   : data.get("caller_phone"),
-            "caller_email"   : data.get("caller_email"),
-            "caller_need"    : data.get("caller_need"),
-            "interest_level" : data.get("interest_level"),
-        }
         llm_logger.debug(f"[{session_id}] JSON parsed successfully")
-        return reply, info
+        return reply, {}
 
     except (json.JSONDecodeError, AttributeError) as e:
         llm_logger.warning(f"[{session_id}] JSON parse failed: {e} | raw: {raw[:200]}")
-        # Return raw text as reply if JSON parsing fails
         return raw.strip(), {}
 
 
