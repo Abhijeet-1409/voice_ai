@@ -213,7 +213,7 @@ async def _process_exchange(
         full_reply     = []
         sentence_count = 0
 
-        async for sentence in stream_reply(transcript, history, extracted_info, session_id=session_id):
+        async for sentence in stream_reply(transcript, history, session_id=session_id):
             full_reply.append(sentence)
             sentence_count += 1
 

@@ -261,8 +261,13 @@ class CartesiaSTT:
                         stt_logger.info(f"[{session_id}] STT partial transcript updated — \"{self._transcript}\"")
                         # If final, signal finalize() that transcript is ready
                         if is_final:
-                            self._final_transcript = text
+                            # Append to final transcript — Cartesia may send multiple finals
+                            if self._final_transcript:
+                                self._final_transcript += " " + text   # ← accumulate
+                            else:
+                                self._final_transcript = text
                             self._final_event.set()
+                            stt_logger.info(f"[{session_id}] STT accumulated transcript — \"{self._final_transcript}\"")
 
                 elif msg_type == "flush_done":
                     stt_logger.info(f"[{session_id}] STT flush_done received")
