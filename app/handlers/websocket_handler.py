@@ -22,7 +22,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from models.db_models import Call, Exchange, SessionLocal
 from services.tts_service import CartesiaTTS
-from services.stt_service import CartesiaSTT
+from services.stt_service import CartesiaSTT,STTError
 from services.llm_service import stream_reply
 from utils.email_utils import send_email_notification
 from utils.logger import ws_logger, db_logger
@@ -200,12 +200,6 @@ async def _process_exchange(
         # Audio was already streamed in real time — this just flushes remainder
         transcript = await stt.finalize(session_id=session_id)
 
-        if not transcript.strip():
-            ws_logger.warning(f"[{session_id}] Empty transcript — skipping exchange")
-            ctx.state = CallState.LISTENING
-            await _send(websocket, {"type": "listening"})
-            return
-
         # ── Step 2: Send transcript to browser ────────────────────────────
         await _send(websocket, {"type": "transcript", "text": transcript})
         ws_logger.info(f"[{session_id}] Transcript sent to browser")
@@ -262,6 +256,32 @@ async def _process_exchange(
     except asyncio.CancelledError:
         ws_logger.info(f"[{session_id}] Exchange cancelled mid-stream — barge-in")
         raise   # re-raise so speak_task sees CancelledError
+
+    except STTError as e:
+        ws_logger.error(f"[{session_id}] STT failed — {e}")
+
+        # Tell browser what happened
+        await _send(websocket, {"type": "transcript", "text": "..."})
+        ctx.state = CallState.SPEAKING
+
+        # Apologize to customer via TTS
+        apology = "I'm sorry, I didn't quite catch that. Could you please repeat yourself?"
+
+        audio_chunks = bytearray()
+        async for pcm_chunk in tts.synthesize(apology, session_id=session_id):
+            audio_chunks.extend(pcm_chunk)
+
+        if audio_chunks:
+            await _send(websocket, {
+                "type": "audio_chunk",
+                "data": base64.b64encode(bytes(audio_chunks)).decode("utf-8"),
+            })
+
+        await _send(websocket, {"type": "audio_end"})
+        await _send(websocket, {"type": "reply_text", "text": apology})
+
+        ctx.state = CallState.LISTENING
+        await _send(websocket, {"type": "listening"})
 
     except Exception as e:
         ws_logger.exception(f"[{session_id}] Exchange failed — {e}")

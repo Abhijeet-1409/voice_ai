@@ -36,6 +36,11 @@ import websockets
 from config.settings import settings
 from utils.logger import stt_logger
 
+# ── STTError ─────────────────────────────────────────────────────────────────
+class STTError(RuntimeError):
+    """Base class for all STT errors."""
+    pass
+
 # ── Constants ─────────────────────────────────────────────────────────────────
 
 CARTESIA_STT_WS_URL = "wss://api.cartesia.ai/stt/websocket"
@@ -61,6 +66,8 @@ class CartesiaSTT:
         self._final_event     = asyncio.Event()   # set when is_final=true received
         self._flush_event     = asyncio.Event()   # set when flush_done received
         self._final_transcript = ""         # holds the last final transcript
+        self._connection_error = False       # flag to indicate connection issues
+        self._connection_error_message = ""     # store connection error message for logging
 
 
     # ── Connect ───────────────────────────────────────────────────────────────
@@ -77,6 +84,8 @@ class CartesiaSTT:
             f"&language=en"
             f"&encoding=pcm_s16le"
             f"&sample_rate=16000"
+            f"&min_volume=0.0"
+            f"&max_silence_duration_secs=10"
             f"&cartesia_version={CARTESIA_VERSION}"
             f"&access_token={settings.cartesia_api_key}"
         )
@@ -153,7 +162,16 @@ class CartesiaSTT:
             stt_logger.debug(f"[{session_id}] STT finalize sent — waiting for flush_done")
 
             # Wait for flush_done acknowledgment (max 5 seconds)
-            await asyncio.wait_for(self._flush_event.wait(), timeout=5.0)
+            await asyncio.wait_for(asyncio.gather(
+                self._final_event.wait(),
+                self._flush_event.wait()
+            ), timeout=5.0)
+
+            if not self._final_transcript.strip():
+                raise RuntimeError("STT finalize succeeded but no transcript received")
+
+            if self._connection_error:
+                raise RuntimeError(f"STT error — {self._connection_error_message}")
 
             transcript = self._final_transcript.strip()
             stt_logger.info(f"[{session_id}] Transcript: {transcript}")
@@ -161,12 +179,14 @@ class CartesiaSTT:
 
         except asyncio.TimeoutError:
             stt_logger.error(f"[{session_id}] STT finalize timed out after 5s")
-            return ""
+            raise STTError(f"STT timed out") from None
+
+        except RuntimeError as e:
+            raise STTError(str(e)) from None
 
         except Exception as e:
             stt_logger.error(f"[{session_id}] STT finalize failed — {e}")
-            return ""
-
+            raise STTError(str(e)) from None
 
     # ── Close ─────────────────────────────────────────────────────────────────
 
@@ -222,40 +242,50 @@ class CartesiaSTT:
                     text     = msg.get("text", "").strip()
                     is_final = msg.get("is_final", False)
 
-                    stt_logger.debug(
+                    stt_logger.info(
                         f"[{session_id}] STT transcript — "
                         f"is_final={is_final} — \"{text}\""
                     )
 
+                    words    = msg.get("words", [])
+                    duration = msg.get("duration", 0)
+                    stt_logger.info(
+                        f"[{session_id}] STT transcript — "
+                        f"is_final={is_final} — duration={duration:.2f}s — "
+                        f"words={len(words)} — \"{text}\""
+                    )
+
                     # Accumulate transcript text
                     if text:
-                        self._final_transcript = text
-
-                    # If final, signal finalize() that transcript is ready
-                    if is_final:
-                        self._final_event.set()
+                        self._transcript = text
+                        stt_logger.info(f"[{session_id}] STT partial transcript updated — \"{self._transcript}\"")
+                        # If final, signal finalize() that transcript is ready
+                        if is_final:
+                            self._final_transcript = text
+                            self._final_event.set()
 
                 elif msg_type == "flush_done":
-                    stt_logger.debug(f"[{session_id}] STT flush_done received")
+                    stt_logger.info(f"[{session_id}] STT flush_done received")
                     # flush_done signals finalize() the flush is complete
                     self._flush_event.set()
 
                 elif msg_type == "done":
-                    stt_logger.debug(f"[{session_id}] STT done received — closing")
+                    stt_logger.info(f"[{session_id}] STT done received — closing")
                     break
 
                 elif msg_type == "error":
-                    stt_logger.error(
-                        f"[{session_id}] STT error — "
-                        f"{msg.get('message', 'unknown error')} "
-                        f"[{msg.get('error_code', '')}]"
-                    )
-                    # Signal finalize() to stop waiting on error
+                    self._connection_error_message = msg.get("message", "Unknown error")
+                    self._connection_error = True
                     self._flush_event.set()
+                    self._final_event.set()
 
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            stt_logger.error(f"[{session_id}] STT receiver loop error — {e}")
-            # Unblock finalize() if it's waiting
-            self._flush_event.set()
+            stt_logger.exception(f"[{session_id}] STT receiver loop crashed — {e}")
+            self._connection_error = True
+            self._connection_error_message = str(e)
+            self._flush_event.set()   # unblock finalize() if waiting
+            self._final_event.set()   # unblock finalize() if waiting
+
+
