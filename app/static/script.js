@@ -2,39 +2,42 @@
 //  CONSTANTS
 // ══════════════════════════════════════════════════════════════════════════════
 
-const WS_URL        = `ws://${location.host}/ws/new`;
-const NUM_BARS      = 32;
+const WS_URL = `ws://${location.host}/ws/new`;
+const NUM_BARS = 32;
 const VOLUME_THRESH = 18;   // used only for visualizer bar colour
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  STATE
 // ══════════════════════════════════════════════════════════════════════════════
 
-let ws              = null;
-let sessionId       = null;
-let mediaStream     = null;
-let audioCtx        = null;
-let analyser        = null;
-let animFrameId     = null;
-let vadInstance     = null;        // @ricky0123/vad-web MicVAD instance
+let ws = null;
+let sessionId = null;
+let mediaStream = null;
+let audioCtx = null;
+let analyser = null;
+let animFrameId = null;
+let vadInstance = null;        // @ricky0123/vad-web MicVAD instance
 
 let isAgentSpeaking = false;
-let isPlayingAudio  = false;
+let isPlayingAudio = false;
 let agentAudioQueue = [];
+let activeAudioSource = null;  // currently playing AudioBufferSourceNode
+let audioGeneration = 0;
+let isPlaybackLocked = false;
 
 // ══════════════════════════════════════════════════════════════════════════════
 //  LOGGER
 // ══════════════════════════════════════════════════════════════════════════════
 
 function log(level, ...args) {
-  const ts     = new Date().toISOString().substring(11, 23);
-  const sid    = sessionId ? `[${sessionId.substring(0, 8)}]` : '[no-session]';
+  const ts = new Date().toISOString().substring(11, 23);
+  const sid = sessionId ? `[${sessionId.substring(0, 8)}]` : '[no-session]';
   const prefix = `[${ts}] ${sid}`;
   switch (level) {
     case 'debug': console.debug(prefix, ...args); break;
-    case 'warn':  console.warn(prefix, ...args);  break;
+    case 'warn': console.warn(prefix, ...args); break;
     case 'error': console.error(prefix, ...args); break;
-    default:      console.log(prefix, ...args);
+    default: console.log(prefix, ...args);
   }
 }
 
@@ -43,14 +46,14 @@ function log(level, ...args) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 const conversation = document.getElementById('conversation');
-const emptyState   = document.getElementById('emptyState');
-const statusPill   = document.getElementById('statusPill');
-const statusText   = document.getElementById('statusText');
-const sessionInfo  = document.getElementById('sessionInfo');
-const btnStart     = document.getElementById('btnStart');
-const btnEnd       = document.getElementById('btnEnd');
-const barsEl       = document.getElementById('bars');
-const vadStatusEl  = document.getElementById('vadStatus');
+const emptyState = document.getElementById('emptyState');
+const statusPill = document.getElementById('statusPill');
+const statusText = document.getElementById('statusText');
+const sessionInfo = document.getElementById('sessionInfo');
+const btnStart = document.getElementById('btnStart');
+const btnEnd = document.getElementById('btnEnd');
+const barsEl = document.getElementById('bars');
+const vadStatusEl = document.getElementById('vadStatus');
 
 // Build visualizer bars
 for (let i = 0; i < NUM_BARS; i++) {
@@ -82,15 +85,15 @@ function setVadStatus(cls, label) {
 function addMessage(role, text) {
   if (emptyState && emptyState.parentNode) emptyState.remove();
 
-  const msg    = document.createElement('div');
+  const msg = document.createElement('div');
   msg.className = `msg ${role}`;
 
-  const label  = document.createElement('div');
-  label.className   = 'msg-label';
+  const label = document.createElement('div');
+  label.className = 'msg-label';
   label.textContent = role === 'customer' ? 'You' : 'Priya';
 
   const bubble = document.createElement('div');
-  bubble.className   = 'msg-bubble';
+  bubble.className = 'msg-bubble';
   bubble.textContent = text;
 
   msg.appendChild(label);
@@ -113,13 +116,13 @@ btnStart.addEventListener('click', async () => {
   try {
     mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation    : true,
-        noiseSuppression    : true,
-        autoGainControl     : true,
-        channelCount        : 1,
-        sampleRate          : 16000,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 16000,
         googNoiseSuppression: true,
-        googHighpassFilter  : true,
+        googHighpassFilter: true,
       }
     });
     log('info', 'Microphone access granted');
@@ -162,7 +165,7 @@ btnStart.addEventListener('click', async () => {
     setStatus('idle', 'Idle');
     setVadStatus('', 'vad inactive');
     btnStart.disabled = false;
-    btnEnd.disabled   = true;
+    btnEnd.disabled = true;
     stopVolumeLoop();
     destroyVAD();
   };
@@ -204,17 +207,17 @@ async function initVAD() {
 
   try {
     vadInstance = await vad.MicVAD.new({
-      onnxWASMBasePath : 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/',
-      baseAssetPath    : 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/',
-      stream           : mediaStream,
+      onnxWASMBasePath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/',
+      baseAssetPath: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/',
+      stream: mediaStream,
 
-      positiveSpeechThreshold : 0.3,    // was 0.75 — much more inclusive, catches soft speech
-      negativeSpeechThreshold : 0.25,   // was 0.65 — more tolerant of natural pauses
-      redemptionFrames        : 44,     // was 10  — 1400ms patience before cutting off (1400/32)
-      preSpeechPadFrames      : 25,     // was 5   — 800ms pre-speech context (800/32)
-      minSpeechFrames         : 13,     // was 4   — 400ms minimum speech length (400/32)
-      submitUserSpeechOnPause : false,  // don't submit on pause — wait for full utterance
-      userSpeakingThreshold   : 0.6,    // confidence threshold for "user is speaking" UI state
+      positiveSpeechThreshold: 0.3,    // was 0.75 — much more inclusive, catches soft speech
+      negativeSpeechThreshold: 0.25,   // was 0.65 — more tolerant of natural pauses
+      redemptionFrames: 44,     // was 10  — 1400ms patience before cutting off (1400/32)
+      preSpeechPadFrames: 25,     // was 5   — 800ms pre-speech context (800/32)
+      minSpeechFrames: 13,     // was 4   — 400ms minimum speech length (400/32)
+      submitUserSpeechOnPause: false,  // don't submit on pause — wait for full utterance
+      userSpeakingThreshold: 0.6,    // confidence threshold for "user is speaking" UI state
 
       onSpeechStart: () => {
         log('info', 'VAD — speech start');
@@ -238,7 +241,7 @@ async function initVAD() {
         setVadStatus('', 'vad listening');
         setStatus('thinking', 'Thinking');
         const wavBuffer = float32ToWav(audio);
-        const base64    = arrayBufferToBase64(wavBuffer);
+        const base64 = arrayBufferToBase64(wavBuffer);
         wsSend({ type: 'audio_chunk', data: base64 });
         wsSend({ type: 'audio_end' });
         log('info', `Sent audio_chunk + audio_end — wav=${(wavBuffer.byteLength / 1024).toFixed(1)}KB`);
@@ -301,10 +304,12 @@ function handleServerMessage(msg) {
     case 'audio_chunk': {
       // Cartesia sends raw PCM (pcm_s16le, 16kHz mono) — wrap in WAV header
       const binary = atob(msg.data);
-      const bytes  = new Uint8Array(binary.length);
+      const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
       const wavBuffer = buildWavBuffer(bytes.buffer);
+      wavBuffer._generation = audioGeneration;   // stamp with current generation
+
       log('debug', `Audio chunk — pcm=${(bytes.length / 1024).toFixed(1)}KB — queue=${agentAudioQueue.length}`);
 
       agentAudioQueue.push(wavBuffer);
@@ -332,41 +337,76 @@ function handleServerMessage(msg) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 async function playNextChunk() {
-  if (agentAudioQueue.length === 0) {
-    log('debug', 'Queue empty — playback complete');
-    isPlayingAudio  = false;
-    isAgentSpeaking = false;
-    wsSend({ type: 'ready' });
-    setStatus('active', 'Listening');
+  if (isPlaybackLocked) {
+    log('debug', 'playNextChunk re-entry blocked — already running');
     return;
   }
-
-  isPlayingAudio  = true;
-  isAgentSpeaking = true;
-  setStatus('speaking', 'Speaking');
-
-  const buffer = agentAudioQueue.shift();
-  log('debug', `Playing — ${(buffer.byteLength / 1024).toFixed(1)}KB — queue=${agentAudioQueue.length}`);
+  isPlaybackLocked = true
 
   try {
+
+    if (agentAudioQueue.length === 0) {
+      log('debug', 'Queue empty — playback complete');
+      isPlayingAudio = false;
+      isAgentSpeaking = false;
+      wsSend({ type: 'ready' });
+      setStatus('active', 'Listening');
+      return;
+    }
+
+    const buffer = agentAudioQueue.shift();
+    log('debug', `Playing — ${(buffer.byteLength / 1024).toFixed(1)}KB — queue=${agentAudioQueue.length}`);
+
+    // Skip chunks from a previous generation — they are stale barge-in leftovers
+    if (buffer._generation !== undefined && buffer._generation !== audioGeneration) {
+      log('debug', `Skipping stale chunk — chunk gen=${buffer._generation} current gen=${audioGeneration}`);
+      playNextChunk();   // move to next chunk
+      return;
+    }
+
+    isPlayingAudio = true;
+    isAgentSpeaking = true;
+    setStatus('speaking', 'Speaking');
+
     const decoded = await audioCtx.decodeAudioData(buffer);
-    const src     = audioCtx.createBufferSource();
-    src.buffer    = decoded;
+    const src = audioCtx.createBufferSource();
+    src.buffer = decoded;
     src.connect(audioCtx.destination);
-    src.onended   = () => playNextChunk();
+    src.onended = () => {
+      if (activeAudioSource === src) {
+        activeAudioSource = null;
+        playNextChunk();
+      }
+      // if activeAudioSource !== src — this source was stopped by barge-in
+      // do NOT call playNextChunk() — the new chain will handle it
+    };
+    activeAudioSource = src;
     src.start();
     log('debug', `Playing — duration=${decoded.duration.toFixed(2)}s`);
   } catch (err) {
     log('error', `Audio decode error — ${err.message}`);
     playNextChunk();   // skip bad chunk, continue queue
   }
+  finally {
+    isPlaybackLocked = false;
+  }
 }
 
 function clearAudioQueue() {
   const n = agentAudioQueue.length;
   agentAudioQueue = [];
-  isPlayingAudio  = false;
+  isPlayingAudio = false;
   isAgentSpeaking = false;
+  // Stop currently playing source — prevents src.onended firing after barge-in
+  if (activeAudioSource) {
+    try {
+      activeAudioSource.onended = null;  // disconnect the callback first
+      activeAudioSource.stop();
+    } catch (e) {
+      // ignore — source may have already ended naturally
+    }
+    activeAudioSource = null;
+  }
   log('info', `Audio queue cleared — ${n} chunks discarded`);
 }
 
@@ -375,6 +415,7 @@ function clearAudioQueue() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function triggerBargeIn() {
+  audioGeneration++;   // ← invalidates all in-flight chunks
   clearAudioQueue();
   wsSend({ type: 'interrupt' });
   setStatus('active', 'Listening');
@@ -409,7 +450,7 @@ function stopVolumeLoop() {
 function updateBars(dataArray) {
   const step = Math.floor(dataArray.length / NUM_BARS);
   bars.forEach((bar, i) => {
-    const val    = dataArray[i * step] || 0;
+    const val = dataArray[i * step] || 0;
     const height = Math.max(4, (val / 255) * 28);
     bar.style.height = `${height}px`;
     bar.classList.toggle('active', val > VOLUME_THRESH * 2);
@@ -426,27 +467,27 @@ function updateBars(dataArray) {
  * into a complete WAV ArrayBuffer ready to send to the server.
  */
 function float32ToWav(float32Array) {
-  const numSamples  = float32Array.length;
-  const sampleRate  = 16000;
+  const numSamples = float32Array.length;
+  const sampleRate = 16000;
   const numChannels = 1;
-  const bitDepth    = 16;
-  const byteRate    = sampleRate * numChannels * bitDepth / 8;
-  const blockAlign  = numChannels * bitDepth / 8;
-  const dataSize    = numSamples * blockAlign;
-  const buffer      = new ArrayBuffer(44 + dataSize);
-  const view        = new DataView(buffer);
+  const bitDepth = 16;
+  const byteRate = sampleRate * numChannels * bitDepth / 8;
+  const blockAlign = numChannels * bitDepth / 8;
+  const dataSize = numSamples * blockAlign;
+  const buffer = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(buffer);
 
-  writeString(view, 0,  'RIFF');
-  view.setUint32(4,  buffer.byteLength - 8, true);
-  writeString(view, 8,  'WAVE');
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, buffer.byteLength - 8, true);
+  writeString(view, 8, 'WAVE');
   writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16,           true);
-  view.setUint16(20, 1,            true);   // PCM
-  view.setUint16(22, numChannels,  true);
-  view.setUint32(24, sampleRate,   true);
-  view.setUint32(28, byteRate,     true);
-  view.setUint16(32, blockAlign,   true);
-  view.setUint16(34, bitDepth,     true);
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);   // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, bitDepth, true);
   writeString(view, 36, 'data');
   view.setUint32(40, dataSize, true);
 
@@ -454,7 +495,7 @@ function float32ToWav(float32Array) {
   const pcm = new Int16Array(buffer, 44);
   for (let i = 0; i < numSamples; i++) {
     const s = Math.max(-1, Math.min(1, float32Array[i]));
-    pcm[i]  = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
   }
 
   return buffer;
@@ -466,25 +507,25 @@ function float32ToWav(float32Array) {
  * in a WAV header so decodeAudioData() can play them.
  */
 function buildWavBuffer(pcmBuffer) {
-  const sampleRate    = 16000;
-  const numChannels   = 1;
+  const sampleRate = 16000;
+  const numChannels = 1;
   const bitsPerSample = 16;
-  const byteRate      = sampleRate * numChannels * bitsPerSample / 8;
-  const blockAlign    = numChannels * bitsPerSample / 8;
-  const dataSize      = pcmBuffer.byteLength;
-  const wav           = new ArrayBuffer(44 + dataSize);
-  const view          = new DataView(wav);
+  const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+  const blockAlign = numChannels * bitsPerSample / 8;
+  const dataSize = pcmBuffer.byteLength;
+  const wav = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(wav);
 
-  writeString(view, 0,  'RIFF');
-  view.setUint32(4,  wav.byteLength - 8, true);
-  writeString(view, 8,  'WAVE');
+  writeString(view, 0, 'RIFF');
+  view.setUint32(4, wav.byteLength - 8, true);
+  writeString(view, 8, 'WAVE');
   writeString(view, 12, 'fmt ');
-  view.setUint32(16, 16,            true);
-  view.setUint16(20, 1,             true);
-  view.setUint16(22, numChannels,   true);
-  view.setUint32(24, sampleRate,    true);
-  view.setUint32(28, byteRate,      true);
-  view.setUint16(32, blockAlign,    true);
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
   view.setUint16(34, bitsPerSample, true);
   writeString(view, 36, 'data');
   view.setUint32(40, dataSize, true);
@@ -501,7 +542,7 @@ function writeString(view, offset, str) {
 
 function arrayBufferToBase64(buffer) {
   const bytes = new Uint8Array(buffer);
-  let   bin   = '';
+  let bin = '';
   for (let i = 0; i < bytes.byteLength; i++) bin += String.fromCharCode(bytes[i]);
   return btoa(bin);
 }
