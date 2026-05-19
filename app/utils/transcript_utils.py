@@ -317,11 +317,11 @@ async def correct_transcript(text: str, session_id: str = "") -> str:
         transcript_logger.debug(f"[{session_id}] Regex fix — no changes")
 
     # Stage 3 — Gemini only if contact info detected in Stage 1
-    # if not needs_correction:
-    #     transcript_logger.debug(f"[{session_id}] No contact info detected — skipping Gemini")
-    #     return fixed
+    if not needs_correction:
+        transcript_logger.debug(f"[{session_id}] No contact info detected — skipping Gemini")
+        return fixed
 
-    # transcript_logger.debug(f"[{session_id}] Contact info detected — running Gemini correction")
+    transcript_logger.debug(f"[{session_id}] Contact info detected — running Gemini correction")
 
     try:
         prompt    = _CORRECTION_PROMPT.format(transcript=fixed)
