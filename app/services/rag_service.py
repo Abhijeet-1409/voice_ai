@@ -11,7 +11,7 @@ from utils.logger import rag_logger
 
 RATE_CARD_PATH  = "/app/data/rate_card.xlsx"
 RAG_MODEL_PATH  = "/app/rag_models/all-MiniLM-L6-v2"
-TOP_N           = 5     # number of chunks to return per query
+TOP_N           = 20     # number of chunks to return per query
 
 
 # ── Category keyword map ──────────────────────────────────────────────────────
