@@ -24,6 +24,7 @@ from models.db_models import Call, Exchange, SessionLocal
 from services.tts_service import CartesiaTTS
 from services.stt_service import CartesiaSTT,STTError
 from services.llm_service import stream_reply,extract_info
+from utils.transcript_utils import correct_transcript
 from utils.email_utils import send_email_notification
 from utils.logger import ws_logger, db_logger
 from utils.session_store import (
@@ -200,16 +201,19 @@ async def _process_exchange(
         # Audio was already streamed in real time — this just flushes remainder
         transcript = await stt.finalize(session_id=session_id)
 
-        # ── Step 2: Send transcript to browser ────────────────────────────
+        # Step 2: Correct transcript (regex + Gemini if contact info detected)  ← ADD
+        transcript = await correct_transcript(transcript, session_id=session_id)    
+
+        # ── Step 3: Send transcript to browser ────────────────────────────
         await _send(websocket, {"type": "transcript", "text": transcript})
         ws_logger.info(f"[{session_id}] Transcript sent to browser")
 
-        # ── Step 3: Get conversation history from Redis ────────────────────
+        # ── Step 4: Get conversation history from Redis ────────────────────
         session = get_session(session_id)
         history = session.get("exchanges", []) if session else []
         ws_logger.info(f"[{session_id}] History loaded — {len(history)} exchanges")
 
-        # ── Step 4: Stream LLM reply sentence by sentence ─────────────────
+        # ── Step 5: Stream LLM reply sentence by sentence ─────────────────
         full_reply     = []
         sentence_count = 0
 
@@ -221,30 +225,30 @@ async def _process_exchange(
             if ctx.state == CallState.PROCESSING:
                 ctx.state = CallState.SPEAKING
 
-            # ── Step 5: Synthesize sentence → PCM bytes ────────────────────
+            # ── Step 6: Synthesize sentence → PCM bytes ────────────────────
             audio_chunks = bytearray()
             async for pcm_chunk in tts.synthesize(sentence, session_id=session_id):
                 audio_chunks.extend(pcm_chunk)
 
             if audio_chunks:
-                # ── Step 6: Send audio to browser ──────────────────────────
+                # ── Step 7: Send audio to browser ──────────────────────────
                 await _send(websocket, {
                     "type": "audio_chunk",
                     "data": base64.b64encode(bytes(audio_chunks)).decode("utf-8"),
                 })
                 ws_logger.info(f"[{session_id}] Audio chunk sent — sentence {sentence_count} — {len(audio_chunks) / 1024:.1f}KB")
 
-        # ── Step 7: Signal agent finished speaking ─────────────────────────
+        # ── Step 8: Signal agent finished speaking ─────────────────────────
         await _send(websocket, {"type": "audio_end"})
 
-        # ── Step 8: Send full reply text for display ───────────────────────
+        # ── Step 9: Send full reply text for display ───────────────────────
         agent_reply = " ".join(full_reply)
         await _send(websocket, {"type": "reply_text", "text": agent_reply})
 
-        # ── Step 9: Extract customer info from this exchange ───────────────
+        # ── Step 10: Extract customer info from this exchange ───────────────
         extracted_info = await extract_info(transcript, agent_reply, session_id=session_id)
 
-        # ── Step 10: Save exchange to Redis ────────────────────────────────
+        # ── Step 11: Save exchange to Redis ────────────────────────────────
         add_exchange(
             session_id     = session_id,
             caller_message = transcript,

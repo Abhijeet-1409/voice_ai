@@ -86,6 +86,7 @@ class CartesiaSTT:
             f"&sample_rate=16000"
             f"&min_volume=0.0"
             f"&max_silence_duration_secs=10"
+            f"&prompt=email address at symbol gmail phone number digits"  # ← ADD THIS
             f"&cartesia_version={CARTESIA_VERSION}"
             f"&access_token={settings.cartesia_api_key}"
         )
