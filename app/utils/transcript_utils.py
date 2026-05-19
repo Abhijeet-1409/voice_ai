@@ -230,6 +230,8 @@ The transcript was produced by speech-to-text and may contain errors in:
 - Spoken symbols like "at", "dot", "underscore", "hyphen"
 - "oh" spoken instead of zero in phone numbers
 - Letter spelling like "double u" meaning the letter W
+- Minor grammatical errors introduced by speech-to-text
+- Missing or incorrect punctuation
 
 Examples:
   Input:  "my email is john underscore doe at gmail dot com"
@@ -253,10 +255,20 @@ Examples:
   Input:  "98 seven six five four three two one zero"
   Output: "9876543210"
 
+  Input:  "i wants to know the price of linux vm"
+  Output: "I want to know the price of Linux VM."
+
+  Input:  "yes i am looking for 128 vcpu and 1tb ram"
+  Output: "Yes, I am looking for 128 vCPU and 1TB RAM."
+
 Rules:
-- Fix ONLY email addresses, phone numbers, and spoken symbols
-- Do NOT change pricing questions, product names, or general speech
-- Do NOT add punctuation or restructure sentences
+- Fix email addresses, phone numbers, and spoken symbols
+- Fix grammatical errors (wrong verb forms, missing articles, incorrect tense) introduced by speech-to-text
+- Fix punctuation — add capitalisation at sentence start, periods at sentence end, commas where naturally spoken
+- Stay as close to the original wording as possible — do NOT rephrase, reword, or restructure
+- Do NOT change the meaning of what the speaker said under any circumstances
+- Do NOT add words that were not spoken — only fix what is clearly wrong
+- Do NOT change product names, technical terms, company names, or pricing figures
 - Do NOT explain anything — return ONLY the corrected transcript
 - If nothing needs fixing return the transcript exactly as given
 
@@ -305,11 +317,11 @@ async def correct_transcript(text: str, session_id: str = "") -> str:
         transcript_logger.debug(f"[{session_id}] Regex fix — no changes")
 
     # Stage 3 — Gemini only if contact info detected in Stage 1
-    if not needs_correction:
-        transcript_logger.debug(f"[{session_id}] No contact info detected — skipping Gemini")
-        return fixed
+    # if not needs_correction:
+    #     transcript_logger.debug(f"[{session_id}] No contact info detected — skipping Gemini")
+    #     return fixed
 
-    transcript_logger.debug(f"[{session_id}] Contact info detected — running Gemini correction")
+    # transcript_logger.debug(f"[{session_id}] Contact info detected — running Gemini correction")
 
     try:
         prompt    = _CORRECTION_PROMPT.format(transcript=fixed)
