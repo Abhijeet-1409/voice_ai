@@ -211,13 +211,13 @@ async function initVAD() {
       baseAssetPath: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.29/dist/',
       stream: mediaStream,
 
-      positiveSpeechThreshold: 0.3,    // was 0.75 — much more inclusive, catches soft speech
-      negativeSpeechThreshold: 0.25,   // was 0.65 — more tolerant of natural pauses
-      redemptionFrames: 44,     // was 10  — 1400ms patience before cutting off (1400/32)
-      preSpeechPadFrames: 25,     // was 5   — 800ms pre-speech context (800/32)
-      minSpeechFrames: 13,     // was 4   — 400ms minimum speech length (400/32)
-      submitUserSpeechOnPause: false,  // don't submit on pause — wait for full utterance
-      userSpeakingThreshold: 0.6,    // confidence threshold for "user is speaking" UI state
+      positiveSpeechThreshold: 0.6,    // was 0.3 — higher = needs louder/clearer speech to trigger
+      negativeSpeechThreshold: 0.45,   // was 0.25 — higher = cuts off sooner when voice drops
+      redemptionFrames: 20,            // was 44 — less patience before cutting off (640ms instead of 1400ms)
+      preSpeechPadFrames: 10,          // was 25 — less pre-speech context needed (320ms instead of 800ms)
+      minSpeechFrames: 13,             // unchanged — 400ms minimum still reasonable
+      submitUserSpeechOnPause: false,  // unchanged
+      userSpeakingThreshold: 0.75,     // was 0.6 — higher confidence needed to show "speaking" in UI
 
       onSpeechStart: () => {
         log('info', 'VAD — speech start');
