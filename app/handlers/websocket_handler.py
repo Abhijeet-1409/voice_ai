@@ -202,7 +202,7 @@ async def _process_exchange(
         transcript = await stt.finalize(session_id=session_id)
 
         # Step 2: Correct transcript (regex + Gemini if contact info detected)  ← ADD
-        transcript = await correct_transcript(transcript, session_id=session_id)    
+        # transcript = await correct_transcript(transcript, session_id=session_id)    
 
         # ── Step 3: Send transcript to browser ────────────────────────────
         await _send(websocket, {"type": "transcript", "text": transcript})
