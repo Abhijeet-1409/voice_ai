@@ -1,47 +1,44 @@
-# Web framework
-fastapi
-uvicorn[standard]
+# ─────────────────────────────────────────────
+# AI Voice Bot — Requirements
+# Exotel AgentStream + Gemini Live API
+# ─────────────────────────────────────────────
+# Install: pip install -r requirements.txt
 
-# WebSocket
-websockets
+# ── Core Server ───────────────────────────────
+fastapi==0.115.5           # WebSocket server framework
+uvicorn==0.32.1            # ASGI server to run FastAPI
+websockets==13.1           # WebSocket client/server support
 
-# STT
-faster-whisper
+# ── Gemini Live ───────────────────────────────
+google-genai==1.9.0        # Official Google Gemini SDK (includes Live API)
 
-# LLM
-google-generativeai
+# ── HTTP Requests (for Exotel outbound API + CRM) ──
+requests==2.32.3           # Make HTTP calls to Exotel API and CRM
 
-# TTS
-sherpa-onnx
-kokoro
+# ── RAG — Embeddings ──────────────────────────
+# Uncomment whichever embedding provider you use:
 
-# RAG
-sentence-transformers
-openpyxl
-pandas
-numpy
-scikit-learn
+# openai==1.54.4           # OpenAI embeddings (text-embedding-3-small)
+# google-generativeai      # Google embeddings (already included via google-genai)
 
-# Database
-sqlalchemy
-asyncpg
-alembic
+# ── RAG — Vector Database ─────────────────────
+# Uncomment whichever vector DB you use:
 
-# Session store
-redis
+# pinecone==5.4.2          # Pinecone managed vector DB
+# chromadb==0.5.20         # Chroma open-source vector DB (local or server)
+# pgvector==0.3.5          # pgvector extension for PostgreSQL
+# qdrant-client==1.12.1    # Qdrant vector DB client
+# weaviate-client==4.9.4   # Weaviate vector DB client
 
-# Audio processing
-pydub
-soundfile
+# ── CRM ───────────────────────────────────────
+# Uncomment whichever CRM you use:
 
-# Email
-secure-smtplib
+# simple-salesforce==1.12.6   # Salesforce CRM
+# hubspot-api-client==10.1.0  # HubSpot CRM
+# pyzoho                       # Zoho CRM
 
-# Config
-pydantic-settings
-python-dotenv
+# ── Environment Variables ─────────────────────
+python-dotenv==1.0.1       # Load .env file for local development
 
-# Utilities
-aiofiles
-python-multipart
-uuid
+# ── Utilities ─────────────────────────────────
+python-multipart==0.0.12   # Required by FastAPI for form data (Exotel outbound API)

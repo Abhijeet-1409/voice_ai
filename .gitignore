@@ -23,6 +23,7 @@ build/
 venv/
 .venv/
 env/
+bot_venv/
 
 # ── Docker ────────────────────────────────────────────────────────────────────
 # Keep docker-compose.yml and Dockerfile in git
@@ -49,3 +50,8 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# ── Folders ───────────────────────────────────────────────────────────────────────
+tts_models/
+rag_models/
+data/
