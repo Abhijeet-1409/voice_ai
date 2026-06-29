@@ -1,0 +1,8 @@
+EXOTEL_SAMPLE_RATE = 16000        # Hz — always use 16kHz (not 8kHz default)
+GEMINI_OUTPUT_RATE = 24000        # Hz — Gemini Live outputs at 24kHz
+AUDIO_CHUNK_MS = 100              # Exotel sends audio every 100ms
+CUSTOMER_CACHE_TTL = 900          # 15 minutes in seconds
+CALL_SESSION_TTL = 21600          # 6 hours — safety TTL for Redis transcript
+MAX_TOOL_RESULT_WORDS = 200       # Gemini speaks results aloud; keep short
+GEMINI_MODEL = "gemini-2.5-flash-live-preview"
+GEMINI_VOICE = "Aoede"            # Warm female voice, good for support bots
