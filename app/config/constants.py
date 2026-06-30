@@ -6,3 +6,4 @@ CALL_SESSION_TTL = 21600          # 6 hours — safety TTL for Redis transcript
 MAX_TOOL_RESULT_WORDS = 200       # Gemini speaks results aloud; keep short
 GEMINI_MODEL = "gemini-2.5-flash-live-preview"
 GEMINI_VOICE = "Aoede"            # Warm female voice, good for support bots
+GEMINI_KEY_COOLDOWN_SECONDS = 3600  # 1 hour — cooldown period for API key usage
