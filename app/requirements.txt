@@ -17,6 +17,9 @@ google-genai==1.9.0        # Official Google Gemini SDK (includes Live API)
 # ── HTTP Requests (for Exotel outbound API + CRM) ──
 requests==2.32.3           # Make HTTP calls to Exotel API and CRM
 
+# ── State Management / Caching ────────────────
+redis==5.2.1               # Redis client (includes redis.asyncio support)
+
 # ── RAG — Embeddings ──────────────────────────
 # Uncomment whichever embedding provider you use:
 
