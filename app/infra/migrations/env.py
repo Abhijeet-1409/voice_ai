@@ -22,7 +22,7 @@ from infra.postgres.base import Base
 from infra.postgres.call_log import CallLog
 from infra.postgres.transcript import Transcript
 from infra.postgres.tool_log import ToolLog
-
+from infra.postgres.knowledge_base import KnowledgeBase
 
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
