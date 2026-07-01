@@ -1,4 +1,4 @@
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
      GEMINI_API_KEY_1 : str
@@ -22,4 +22,4 @@ class Settings(BaseSettings):
      class Config:
         env_file = ".env"
 
-settings = Settings()
+settings: Settings = Settings()

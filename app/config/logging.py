@@ -3,6 +3,8 @@ import logging
 from contextvars import ContextVar
 from logging.handlers import RotatingFileHandler
 
+from app.config.settings import settings
+
 
 # ── Log directory ─────────────────────────────────────────────────────────────
 
