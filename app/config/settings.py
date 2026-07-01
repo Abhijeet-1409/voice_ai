@@ -17,6 +17,7 @@ class Settings(BaseSettings):
      CRM_API_KEY : str
      CRM_BASE_URL : str
      LOG_LEVEL : str = "INFO"
+     DB_ECHO : bool = False
 
      class Config:
         env_file = ".env"
