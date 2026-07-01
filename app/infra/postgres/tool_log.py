@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 
 from sqlalchemy import String, Integer, DateTime, Text
@@ -17,4 +17,4 @@ class ToolLog(Base):
     arguments:  Mapped[dict] = mapped_column(JSONB, nullable=False)
     result:     Mapped[str] = mapped_column(Text, nullable=True)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=True)
-    called_at:  Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    called_at:  Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
