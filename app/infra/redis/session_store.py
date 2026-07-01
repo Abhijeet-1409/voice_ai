@@ -3,7 +3,6 @@ from datetime import datetime
 
 from redis.exceptions import RedisError
 
-from config.settings import settings
 from config.constants import CALL_SESSION_TTL
 from config.logging import get_logger
 

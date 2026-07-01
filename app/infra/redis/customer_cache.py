@@ -2,7 +2,6 @@ import json
 
 from redis.exceptions import RedisError
 
-from config.settings import settings
 from config.constants import CUSTOMER_CACHE_TTL
 from config.logging import get_logger
 from infra.redis.client import redis_client
