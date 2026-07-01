@@ -52,3 +52,4 @@ python-multipart==0.0.12   # Required by FastAPI for form data (Exotel outbound 
 alembic==1.13.1
 sqlalchemy==2.0.36 
 asyncpg==0.30.0
+pgvector==0.3.6
