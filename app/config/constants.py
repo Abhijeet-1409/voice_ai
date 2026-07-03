@@ -1,3 +1,10 @@
+from enum import Enum
+
+class TicketPriority(Enum):
+    LOW    = "low"
+    NORMAL = "normal"
+    HIGH   = "high"
+
 EXOTEL_SAMPLE_RATE = 16000        # Hz — always use 16kHz (not 8kHz default)
 GEMINI_OUTPUT_RATE = 24000        # Hz — Gemini Live outputs at 24kHz
 AUDIO_CHUNK_MS = 100              # Exotel sends audio every 100ms
