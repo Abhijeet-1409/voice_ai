@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────
 # AI Voice Bot — Requirements
-# Exotel AgentStream + Gemini Live API
+# Exotel AgentStream + Gemini Live API (LiveKit Hybrid)
 # ─────────────────────────────────────────────
 # Install: pip install -r requirements.txt
 
@@ -8,11 +8,13 @@
 fastapi==0.115.5           # WebSocket server framework
 uvicorn==0.32.1            # ASGI server to run FastAPI
 websockets==13.1           # WebSocket client/server support
-pydantic==2.13.0 
+pydantic==2.13.0
 pydantic-settings==2.14.2
 
-# ── Gemini Live ───────────────────────────────
-google-genai==1.9.0        # Official Google Gemini SDK (includes Live API)
+# ── LiveKit Core, Agents & Google Gemini Plugin ───────────────
+livekit==1.1.12                 # Core Python WebRTC SDK (Pinned for agents compatibility)
+livekit-agents~=1.6.4           # Realtime Voice AI Agents Framework
+livekit-plugins-google~=1.6.4   # Google Cloud & Gemini Live Realtime Plugin (Auto-pulls compatible google-genai)
 
 # ── HTTP Requests (for Exotel outbound API + CRM) ──
 requests==2.32.3           # Make HTTP calls to Exotel API and CRM
@@ -31,7 +33,6 @@ redis==5.2.1               # Redis client (includes redis.asyncio support)
 
 # pinecone==5.4.2          # Pinecone managed vector DB
 # chromadb==0.5.20         # Chroma open-source vector DB (local or server)
-# pgvector==0.3.5          # pgvector extension for PostgreSQL
 # qdrant-client==1.12.1    # Qdrant vector DB client
 # weaviate-client==4.9.4   # Weaviate vector DB client
 
@@ -40,7 +41,7 @@ redis==5.2.1               # Redis client (includes redis.asyncio support)
 
 # simple-salesforce==1.12.6   # Salesforce CRM
 # hubspot-api-client==10.1.0  # HubSpot CRM
-# pyzoho                       # Zoho CRM
+# pyzoho                      # Zoho CRM
 
 # ── Environment Variables ─────────────────────
 python-dotenv==1.0.1       # Load .env file for local development
@@ -48,8 +49,8 @@ python-dotenv==1.0.1       # Load .env file for local development
 # ── Utilities ─────────────────────────────────
 python-multipart==0.0.12   # Required by FastAPI for form data (Exotel outbound API)
 
-#── DATABASE ─────────────────────────────────
+# ── DATABASE ─────────────────────────────────
 alembic==1.13.1
-sqlalchemy==2.0.36 
+sqlalchemy==2.0.36
 asyncpg==0.30.0
 pgvector==0.3.6
