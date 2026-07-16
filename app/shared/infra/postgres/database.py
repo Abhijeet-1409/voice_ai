@@ -1,8 +1,10 @@
 from functools import cache
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine, AsyncSession, async_sessionmaker
+
+from pgvector.asyncpg import register_vector
 
 from config.logger import get_logger
 from config.settings import get_app_settings, AppBaseSettings
@@ -17,6 +19,7 @@ def get_async_engine() -> AsyncEngine:
     Create and cache a singleton SQLAlchemy asynchronous engine.
 
     The engine configuration is retrieved from the application settings,
+    configured with pgvector support for vector embeddings,
     including the database URL and query echo options.
 
     Returns:
@@ -32,6 +35,13 @@ def get_async_engine() -> AsyncEngine:
         max_overflow=10,      # Number of extra connections to allow during traffic spikes
         pool_pre_ping=True    # Highly recommended: checks if a connection is alive before using it
     )
+
+    # Listen for every new database connection created by the pool
+    @event.listens_for(engine.sync_engine, "connect")
+    @event.listens_for(engine.sync_engine, "connect")
+    def register_custom_types(dbapi_connection, connection_record):
+        # Instruct the asyncpg driver to load the pgvector codec
+        dbapi_connection.run_async(lambda conn: register_vector(conn))
 
     return engine
 
