@@ -16,6 +16,14 @@ _LOGGER = "infra.postgres.call_log"
 
 
 class CallLog(Base):
+    """
+    SQLAlchemy model representing a recorded phone call session.
+
+    This table tracks the lifecycle metadata of every call, including caller
+    information, timestamps, duration, and termination reasons, serving as a
+    historical record for billing, debugging, and analytics.
+    """
+
     __tablename__ = "calls"
 
     id:             Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
