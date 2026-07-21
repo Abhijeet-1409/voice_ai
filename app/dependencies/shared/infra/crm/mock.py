@@ -21,16 +21,16 @@ class MockCRMClient(BaseCRMClient):
     def __init__(self):
         self.logger = get_logger(_LOGGER)
 
-    async def get_by_phone(self, phone: str) -> Optional[dict]:
+    async def get_customer(self, identifier: str) -> Optional[dict]:
         """
-        Mock implementation of fetching a customer by phone.
+        Mock implementation of fetching a customer by identifier.
         """
-        self.logger.debug(f"Mock CRM get_by_phone — phone={phone}")
+        self.logger.debug(f"Mock CRM get_customer — identifier={identifier}")
         # Returning a dictionary to simulate an existing customer.
         return {
             "customer_id":    "MOCK-001",
             "name":           "Joy Sharma",
-            "phone":          phone,
+            "phone":          "9132467843",
             "email":          "joy@example.com",
             "current_plan":   "Basic",
             "plan_since":     "2023-06-01",
@@ -38,13 +38,13 @@ class MockCRMClient(BaseCRMClient):
             "monthly_spend":  499,
             "usage_percent":  87,
             "open_tickets":   0
-        }
+        } 
 
-    async def create_lead(self, phone: str, interest: str) -> str:
+    async def create_lead(self, identifier: str, interest: str) -> str:
         """
         Mock implementation of creating a sales lead.
         """
-        self.logger.debug(f"Mock CRM create_lead — phone={phone} interest={interest}")
+        self.logger.debug(f"Mock CRM create_lead — identifier={identifier} interest={interest}")
         return "MOCK-LEAD-001"
 
     async def create_ticket(self, customer_id: str, description: str, priority: TicketPriority = TicketPriority.NORMAL) -> str:
