@@ -18,5 +18,5 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["config*", "infra*"]
-exclude = ["infra.migrations*"]
+include = ["shared*"]
+exclude = ["shared.infra.migrations*"]
