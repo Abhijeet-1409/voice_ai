@@ -76,7 +76,7 @@ class PgVectorStore(BaseVectorStore):
                     {"content": content, "vector": vector}
                 )
                 await session.commit()
-                self.logger.debug(f"Inserted chunk into knowledge base")
+                self.logger.debug("Inserted chunk into knowledge base")
 
         except SQLAlchemyError as e:
             self.logger.error(f"Failed to insert chunk: {e}")
