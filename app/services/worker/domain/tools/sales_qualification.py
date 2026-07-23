@@ -1,7 +1,6 @@
 from livekit.agents import function_tool, RunContext
 
 from shared.config.logger import get_logger
-
 from shared.infra.crm.mock import get_mockcrmclient
 
 
@@ -34,10 +33,10 @@ async def qualify_lead(
         lead_id = await crm_client.create_lead(contact, interest)
 
         logger.debug(f"Created qualified lead — contact={contact} track={track} lead_id={lead_id}")
-        return f"A lead is created for contact={contact} with lead id={lead_id}"
+        return f"Successfully logged the qualified lead. The reference lead ID is {lead_id}."
     except Exception as e:
         logger.error(f"Failed to create qualified lead — contact={contact} error={e}")
-        raise
+        return "System error: unable to log the qualified lead at this time. Please inform the caller to try again later."
 
 
 @function_tool
@@ -61,10 +60,10 @@ async def schedule_meeting(
         schedule_date_time = f"{proposed_time} 10:00 AM"
         
         logger.debug(f"Scheduled assessment meeting — contact={contact} proposed_time={proposed_time}")
-        return f"Scheduled meeting for contact={contact} on {schedule_date_time}"
+        return f"Successfully scheduled the assessment meeting for {schedule_date_time}."
     except Exception as e:
         logger.error(f"Failed to schedule meeting — contact={contact} error={e}")
-        raise 
+        return "System error: unable to schedule the meeting at this time. Please inform the caller to try again later."
 
 
 @function_tool
@@ -86,7 +85,7 @@ async def send_followup_email(
     """
     try:
         logger.debug(f"Sent follow-up email — contact={contact} track={track}")
-        return "A follow-up email has been sent to the user."
+        return "Successfully sent the follow-up email for the discussed track."
     except Exception as e:
         logger.error(f"Failed to send follow-up email — contact={contact} error={e}")
-        raise
+        return "System error: unable to send the follow-up email at this time."
