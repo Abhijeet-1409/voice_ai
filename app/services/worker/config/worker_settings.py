@@ -19,6 +19,7 @@ class WorkerSettings(AppBaseSettings):
     GEMINI_MODEL: str = "gemini-3.1-flash-live-preview"
     GEMINI_TEMPERATURE: float = 0.4
     GEMINI_VOICE: str = "Aoede"
+    GEMINI_TOKEN_LIMIT=80,
 
     # ── Email ─────────────────────────────────────────────────────────────────
     GMAIL_ADDRESS: str
