@@ -11,7 +11,7 @@ class TicketPriority(Enum):
     NORMAL = "normal"
     HIGH   = "high"
 
-Channel = Literal["exotel", "web"]      # source of the call (phone or browser)
+Channel = Literal["phone", "web"]      # source of the call (phone or browser)
 CallType = Literal["inbound", "outreach"]  # direction of the call
 
 CUSTOMER_CACHE_TTL = 900          # 15 minutes in seconds
