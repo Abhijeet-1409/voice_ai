@@ -1,6 +1,6 @@
 import uuid
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import String, Integer, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
@@ -41,6 +41,7 @@ class CallLog(Base):
     ended_at:       Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     end_reason:     Mapped[Optional[str]] = mapped_column(String, nullable=True)
     duration_secs:  Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at:     Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 async def save_call_log(
