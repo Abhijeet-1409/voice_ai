@@ -2,9 +2,9 @@ import uuid
 import json
 from json import JSONDecodeError
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime
 
-from sqlalchemy import String, Integer, DateTime, Text
+from sqlalchemy import String, Integer, DateTime, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.exc import SQLAlchemyError
@@ -34,7 +34,7 @@ class ToolLog(Base):
     arguments:  Mapped[dict] = mapped_column(JSONB, nullable=False)
     result:     Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     latency_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    called_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    called_at:  Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 async def save_tool_log(

@@ -1,8 +1,8 @@
 import uuid
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime
 
-from sqlalchemy import String, DateTime, select
+from sqlalchemy import String, DateTime, select, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -32,7 +32,7 @@ class User(Base):
     # FIX: Added Optional[] because nullable=True
     email:          Mapped[Optional[str]] = mapped_column(String, nullable=True)
     
-    created_at:     Mapped[datetime] =  mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at:     Mapped[datetime] =  mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 async def create_user(
