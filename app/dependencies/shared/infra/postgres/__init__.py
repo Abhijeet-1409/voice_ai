@@ -5,6 +5,8 @@ from .tool_log import ToolLog, save_tool_log
 from .user import User, create_user, get_user
 from .knowledge_base import KnowledgeBase
 from .database import db_close, db_init
+from .ticket import Ticket
+from .contact import Contact
 
 __all__ = [
     "Base",
@@ -12,6 +14,8 @@ __all__ = [
     "Transcript",
     "ToolLog",
     "User",
+    "Contact",
+    "Ticket",
     "create_user",
     "get_user",
     "KnowledgeBase",
