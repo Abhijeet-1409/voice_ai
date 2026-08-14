@@ -40,6 +40,22 @@ class TicketStatus(StrEnum):
     OPEN = "open"
     CLOSED = "closed"
 
+class Track(StrEnum):
+    """
+    Enumeration of available AWS partner qualification tracks.
+    
+    These tracks categorize the primary objective or migration strategy 
+    assigned to a contact/lead in the sales funnel.
+
+    Attributes:
+        BILLING_TRANSFER: Represents a transition of existing AWS billing to the partner.
+        GREEN_FIELD_MIGRATION: Represents building or migrating into a brand new, empty AWS environment.
+        VMWARE_WORKLOAD_MIGRATION: Represents the migration of existing on-premises VMware workloads to AWS.
+    """
+    BILLING_TRANSFER = "billing_transfer"
+    GREEN_FIELD_MIGRATION = "green_field_migration"
+    VMWARE_WORKLOAD_MIGRATION = "vmware_workload_migration"
+
 Channel = Literal["phone", "web"]      # source of the call (phone or browser)
 CallType = Literal["inbound", "outreach"]  # direction of the call
 
