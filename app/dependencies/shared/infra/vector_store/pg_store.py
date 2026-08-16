@@ -3,10 +3,9 @@ from functools import cache
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from infra.postgres.database import get_async_sessionmaker
-from infra.vector_store.base import BaseVectorStore
-
-from config.logger import get_logger
+from shared.logging_setup import get_logger
+from shared.infra.vector_store import BaseVectorStore
+from shared.infra.postgres.database import get_async_sessionmaker
 
 
 _LOGGER = "infra.vector_store.pg_store"
