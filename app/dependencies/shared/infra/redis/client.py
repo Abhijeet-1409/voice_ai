@@ -3,11 +3,11 @@ from functools import cache
 import redis.asyncio as redis
 from redis.exceptions import RedisError
 
-from config.logger import get_logger
-from config.settings import get_app_settings, AppBaseSettings
+from shared.logging_setup import get_logger
+from shared.config import get_app_settings, AppBaseSettings
 
 
-_LOGGER_NAME = "infra.redis.client"
+_LOGGER = "infra.redis.client"
 
 
 @cache
@@ -50,7 +50,7 @@ async def ping_redis() -> bool:
     """
 
     redis_client = get_redis_client()
-    logger = get_logger(_LOGGER_NAME)
+    logger = get_logger(_LOGGER)
 
     try:
         await redis_client.ping()
@@ -70,7 +70,7 @@ async def close_redis():
     """
 
     redis_client = get_redis_client()
-    logger = get_logger(_LOGGER_NAME)
+    logger = get_logger(_LOGGER)
 
     try:
         # Note: Use .aclose() for redis-py version 5.0+.

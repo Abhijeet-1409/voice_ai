@@ -4,13 +4,12 @@ from datetime import datetime, timezone
 
 from redis.exceptions import RedisError
 
-from config.logger import get_logger
-from config.constants import CALL_SESSION_TTL
+from shared.logging_setup import get_logger
+from shared.config import CALL_SESSION_TTL
+from shared.infra.redis.client import get_redis_client
 
-from infra.redis.client import get_redis_client
 
-
-_LOGGER_NAME = "infra.redis.session_store"
+_LOGGER = "infra.redis.session_store"
 
 
 async def append_turn(stream_sid: str, speaker: str, text: str) -> None:
@@ -24,7 +23,7 @@ async def append_turn(stream_sid: str, speaker: str, text: str) -> None:
     """
 
     redis_client = get_redis_client()
-    logger = get_logger(_LOGGER_NAME)
+    logger = get_logger(_LOGGER)
 
     key = f"transcript:{stream_sid}"
 
@@ -60,7 +59,7 @@ async def get_transcript(stream_sid: str) -> list:
     """
 
     redis_client = get_redis_client()
-    logger = get_logger(_LOGGER_NAME)
+    logger = get_logger(_LOGGER)
 
     key = f"transcript:{stream_sid}"
 
@@ -91,7 +90,7 @@ async def delete_transcript(stream_sid: str) -> None:
     """
 
     redis_client = get_redis_client()
-    logger = get_logger(_LOGGER_NAME)
+    logger = get_logger(_LOGGER)
 
     key = f"transcript:{stream_sid}"
 

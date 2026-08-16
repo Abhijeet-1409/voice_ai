@@ -1,12 +1,11 @@
 from redis.exceptions import RedisError
 
-from config.logger import get_logger
-from config.constants import GEMINI_KEY_COOLDOWN_SECONDS
+from shared.logging_setup import get_logger
+from shared.config import GEMINI_KEY_COOLDOWN_SECONDS
+from shared.infra.redis.client import get_redis_client
 
-from infra.redis.client import get_redis_client
 
-
-_LOGGER_NAME = "infra.redis.api_key_state"
+_LOGGER = "infra.redis.api_key_state"
 
 
 async def get_key_usage(key_id: str) -> int:
@@ -21,7 +20,7 @@ async def get_key_usage(key_id: str) -> int:
     """
 
     redis_client = get_redis_client()
-    logger = get_logger(_LOGGER_NAME)
+    logger = get_logger(_LOGGER)
 
     try:
         usage = await redis_client.get(f"gemini_key_usage:{key_id}")
@@ -43,7 +42,7 @@ async def increment_key_usage(key_id: str) -> None:
     """
 
     redis_client = get_redis_client()
-    logger = get_logger(_LOGGER_NAME)
+    logger = get_logger(_LOGGER)
 
     try:
         await redis_client.incr(f"gemini_key_usage:{key_id}")
@@ -66,7 +65,7 @@ async def set_key_cooldown(key_id: str, cooldown_seconds: int | None = None) -> 
     """
 
     redis_client = get_redis_client()
-    logger = get_logger(_LOGGER_NAME)
+    logger = get_logger(_LOGGER)
 
     ttl = cooldown_seconds if cooldown_seconds is not None else GEMINI_KEY_COOLDOWN_SECONDS
 
@@ -90,7 +89,7 @@ async def is_key_on_cooldown(key_id: str) -> bool:
     """
 
     redis_client = get_redis_client()
-    logger = get_logger(_LOGGER_NAME)
+    logger = get_logger(_LOGGER)
 
     try:
         cooldown_exists = await redis_client.exists(f"gemini_key_cooldown:{key_id}")

@@ -1,26 +1,25 @@
 from redis.exceptions import RedisError
 
-from infra.redis.client import get_redis_client
-
-from config.logger import get_logger
-from config.constants import WEB_TOKEN_RATE_LIMIT, WEB_TOKEN_RATE_WINDOW_SECONDS
+from shared.infra.redis.client import get_redis_client
+from shared.logging_setup import get_logger
+from shared.config import WEB_TOKEN_RATE_LIMIT, WEB_TOKEN_RATE_WINDOW_SECONDS
 
 
 _LOGGER = "infra.redis.web_token_limit"
 
 
 async def check_token_rate_limit(
-        identifier: str, 
-        limit: int = WEB_TOKEN_RATE_LIMIT, 
+        identifier: str,
+        limit: int = WEB_TOKEN_RATE_LIMIT,
         window_seconds: int = WEB_TOKEN_RATE_WINDOW_SECONDS
     ) -> bool:
     """
     Checks and increments a rate limit counter for LiveKit token issuance using Redis.
 
-    This implements a simple fixed-window rate limiter. It increments a counter 
-    tied to the given identifier. If it is the first request in the window, it 
-    sets the key to expire after `window_seconds`. 
-    
+    This implements a simple fixed-window rate limiter. It increments a counter
+    tied to the given identifier. If it is the first request in the window, it
+    sets the key to expire after `window_seconds`.
+
     Note: If a Redis connection error occurs, this function "fails open" (returns True)
     so that users are not blocked from generating tokens during a cache outage.
 

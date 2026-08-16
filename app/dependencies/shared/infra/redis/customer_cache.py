@@ -3,13 +3,12 @@ from json import JSONDecodeError
 
 from redis.exceptions import RedisError
 
-from config.logger import get_logger
-from config.constants import CUSTOMER_CACHE_TTL
+from shared.logging_setup import get_logger
+from shared.config import CUSTOMER_CACHE_TTL
+from shared.infra.redis.client import get_redis_client
 
-from infra.redis.client import get_redis_client
 
-
-_LOGGER_NAME = "infra.redis.customer_cache"
+_LOGGER = "infra.redis.customer_cache"
 
 
 async def get_cached_customer(identifier: str) -> dict | None:
@@ -20,12 +19,12 @@ async def get_cached_customer(identifier: str) -> dict | None:
         identifier (str): The unique identifier for the customer (e.g., phone number or Clerk ID).
 
     Returns:
-        dict | None: A dictionary containing the cached customer data, or None if 
+        dict | None: A dictionary containing the cached customer data, or None if
                      not found, invalid, or a connection error occurs.
     """
 
     redis_client = get_redis_client()
-    logger = get_logger(_LOGGER_NAME)
+    logger = get_logger(_LOGGER)
 
     key = f"customer:{identifier}"
 
@@ -60,7 +59,7 @@ async def cache_customer(identifier: str, customer_data: dict) -> None:
     """
 
     redis_client = get_redis_client()
-    logger = get_logger(_LOGGER_NAME)
+    logger = get_logger(_LOGGER)
 
     key = f"customer:{identifier}"
 
@@ -85,7 +84,7 @@ async def delete_cached_customer(identifier: str) -> None:
     """
 
     redis_client = get_redis_client()
-    logger = get_logger(_LOGGER_NAME)
+    logger = get_logger(_LOGGER)
 
     key = f"customer:{identifier}"
 
