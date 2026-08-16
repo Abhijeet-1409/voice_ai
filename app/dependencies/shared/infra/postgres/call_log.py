@@ -6,11 +6,10 @@ from sqlalchemy import String, Integer, DateTime, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.exc import SQLAlchemyError
 
-from config.logger import get_logger
-from config.constants import Channel, CallType
-
-from infra.postgres.base import Base
-from infra.postgres.database import get_async_sessionmaker
+from shared.logging_setup import get_logger
+from shared.config import Channel, CallType
+from shared.infra.postgres import Base
+from shared.infra.postgres.database import get_async_sessionmaker
 
 
 _LOGGER = "infra.postgres.call_log"
@@ -20,9 +19,9 @@ class CallLog(Base):
     """
     SQLAlchemy model representing a recorded call session.
 
-    This table tracks the lifecycle metadata of every call across different channels 
-    (like web or exotel), including user associations, caller information, timestamps, 
-    duration, and termination reasons, serving as a historical record for billing, 
+    This table tracks the lifecycle metadata of every call across different channels
+    (like web or exotel), including user associations, caller information, timestamps,
+    duration, and termination reasons, serving as a historical record for billing,
     debugging, and analytics.
     """
 
@@ -32,10 +31,10 @@ class CallLog(Base):
     stream_sid:     Mapped[Optional[str]] = mapped_column(String, unique=True, nullable=True)
     caller_phone:   Mapped[Optional[str]] = mapped_column(String, nullable=True)
     user_id:        Mapped[Optional[str]] = mapped_column(String, ForeignKey("users.id"), nullable=True)
-    
+
     channel:        Mapped[Channel]  = mapped_column(String, nullable=False)
     call_type:      Mapped[CallType] = mapped_column(String, nullable=False)
-    
+
     call_sid:       Mapped[Optional[str]] = mapped_column(String, nullable=True)
     started_at:     Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ended_at:       Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -46,7 +45,7 @@ class CallLog(Base):
 
 async def save_call_log(
     started_at:    datetime,
-    channel:       Channel, 
+    channel:       Channel,
     call_type:     CallType,
     stream_sid:    Optional[str] = None,
     caller_phone:  Optional[str] = None,
@@ -59,8 +58,8 @@ async def save_call_log(
     """
     Saves a completed call record to the PostgreSQL database.
 
-    Uses an asynchronous database session to persist the call details. The async 
-    context manager automatically handles rollbacks on exceptions and safely closes 
+    Uses an asynchronous database session to persist the call details. The async
+    context manager automatically handles rollbacks on exceptions and safely closes
     the session upon completion.
 
     Args:

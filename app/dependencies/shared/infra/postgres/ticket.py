@@ -4,9 +4,8 @@ from datetime import datetime
 from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from shared.config.constants import TicketPriority, TicketStatus
-
-from shared.infra.postgres.database import Base
+from shared.config import TicketPriority, TicketStatus
+from shared.infra.postgres import Base
 
 
 class Ticket(Base):

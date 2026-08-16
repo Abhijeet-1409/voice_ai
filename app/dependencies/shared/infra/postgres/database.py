@@ -6,8 +6,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine, AsyncSessio
 
 from pgvector.asyncpg import register_vector
 
-from config.logger import get_logger
-from config.settings import get_app_settings, AppBaseSettings
+from shared.logging_setup import get_logger
+from shared.config import get_app_settings, AppBaseSettings
 
 
 _LOGGER = "infra.postgres.database"

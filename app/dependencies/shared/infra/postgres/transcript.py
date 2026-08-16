@@ -6,10 +6,9 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.exc import SQLAlchemyError
 
-from config.logger import get_logger
-
-from infra.postgres.base import Base
-from infra.postgres.database import get_async_sessionmaker
+from shared.logging_setup import get_logger
+from shared.infra.postgres import Base
+from shared.infra.postgres.database import get_async_sessionmaker
 
 
 _LOGGER = "infra.postgres.transcript"

@@ -6,10 +6,9 @@ from sqlalchemy import String, DateTime, select, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.exc import SQLAlchemyError
 
-from config.logger import get_logger
-
-from infra.postgres.base import Base
-from infra.postgres.database import get_async_sessionmaker
+from shared.logging_setup import get_logger
+from shared.infra.postgres import Base
+from shared.infra.postgres.database import get_async_sessionmaker
 
 
 _LOGGER = "infra.postgres.users"
@@ -19,8 +18,8 @@ class User(Base):
     """
     SQLAlchemy model representing a registered application user.
 
-    This table maps external authentication identities (like Clerk) to internal 
-    database records, serving as the core entity for linking call logs, billing, 
+    This table maps external authentication identities (like Clerk) to internal
+    database records, serving as the core entity for linking call logs, billing,
     and other user-specific data.
     """
 
@@ -28,22 +27,22 @@ class User(Base):
 
     id:             Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     clerk_user_id:  Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    
+
     # FIX: Added Optional[] because nullable=True
     email:          Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    
+
     created_at:     Mapped[datetime] =  mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 async def create_user(
-        clerk_user_id: str,  
+        clerk_user_id: str,
         email: Optional[str] = None
     ) -> None:
     """
     Creates a new user record in the database.
 
-    Uses an asynchronous database session to persist the user details. The async 
-    context manager automatically handles rollbacks on exceptions and safely closes 
+    Uses an asynchronous database session to persist the user details. The async
+    context manager automatically handles rollbacks on exceptions and safely closes
     the session upon completion.
 
     Args:
@@ -51,7 +50,7 @@ async def create_user(
         email (Optional[str], optional): The user's email address. Defaults to None.
 
     Raises:
-        SQLAlchemyError: If a database constraint fails (e.g., duplicate clerk_user_id) 
+        SQLAlchemyError: If a database constraint fails (e.g., duplicate clerk_user_id)
                          or the transaction cannot be committed.
     """
 
@@ -61,7 +60,7 @@ async def create_user(
     try:
         async with async_session() as session:
             user = User(
-                clerk_user_id=clerk_user_id, 
+                clerk_user_id=clerk_user_id,
                 email=email
             )
             session.add(user)

@@ -4,9 +4,8 @@ from datetime import datetime
 from sqlalchemy import Boolean, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from config.constants import LifecycleStage, Track
-
-from infra.postgres.base import Base
+from shared.config import LifecycleStage, Track
+from shared.infra.postgres import Base
 
 
 class Contact(Base):
@@ -18,9 +17,9 @@ class Contact(Base):
         phone_number (str): Unique, indexed phone number used for contact identification and call routing.
         name (str | None): Full name of the contact, if available.
         email (str | None): Primary email address of the contact, if available.
-        lifecyclestage (LifecycleStage): Current stage of the contact in the sales and conversion 
+        lifecyclestage (LifecycleStage): Current stage of the contact in the sales and conversion
             funnel (defaults to LEAD).
-        track (str | None): Assigned AWS partner qualification track (e.g., Billing Transfer, 
+        track (str | None): Assigned AWS partner qualification track (e.g., Billing Transfer,
             Green Field Migration, VMware Workload Migration).
         qualified (bool): Flag indicating whether the lead/contact has met qualification criteria.
         created_at (datetime): UTC timestamp recording when the contact record was created.
