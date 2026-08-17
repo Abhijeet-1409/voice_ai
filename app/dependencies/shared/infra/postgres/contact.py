@@ -1,4 +1,5 @@
 import uuid
+from typing import Optional
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, String, func
@@ -34,10 +35,10 @@ class Contact(Base):
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    lifecyclestage: Mapped[LifecycleStage] = mapped_column(
+    lifecyclestage: Mapped[LifecycleStage] = mapped_column(String,
         default=LifecycleStage.LEAD, nullable=False
     )
-    track: Mapped[Track | None] = mapped_column(String(64), nullable=True)
+    track: Mapped[Optional[Track]] = mapped_column(String, default=None, nullable=True)
     qualified: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

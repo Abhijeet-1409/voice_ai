@@ -28,8 +28,8 @@ class Ticket(Base):
     contact_id: Mapped[str] = mapped_column(ForeignKey("contacts.id"), nullable=False)
 
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    priority: Mapped[TicketPriority] = mapped_column(default=TicketPriority.NORMAL)
-    status: Mapped[TicketStatus] = mapped_column(default=TicketStatus.OPEN)
+    priority: Mapped[TicketPriority] = mapped_column(String, default=TicketPriority.NORMAL)
+    status: Mapped[TicketStatus] = mapped_column(String, default=TicketStatus.OPEN)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
