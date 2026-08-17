@@ -1,12 +1,10 @@
 from livekit.agents import function_tool, RunContext
 
-from shared.config.logger import get_logger
+from shared.logging_setup import get_logger
+from shared.infra.vector_store import get_pgvectorstore
 
-from shared.infra.vector_store.pg_store import get_pgvectorstore
-
-from config.worker_settings import get_worker_settings
-
-from worker.embedding import get_embedding_model
+from config import get_worker_settings
+from utils import get_embedding_model
 
 
 _LOGGER = "worker.domain.tools.knowledge_base"
@@ -16,8 +14,8 @@ logger = get_logger(_LOGGER)
 @function_tool
 async def search_knowledge_base(ctx: RunContext, query: str) -> str:
     """
-    Search the knowledge base for Intelics services, AWS partner program details, 
-    and our own cloud offerings. ALWAYS call this before answering any factual 
+    Search the knowledge base for Intelics services, AWS partner program details,
+    and our own cloud offerings. ALWAYS call this before answering any factual
     question — never answer from memory.
 
     Args:
@@ -31,9 +29,9 @@ async def search_knowledge_base(ctx: RunContext, query: str) -> str:
         worker_settings = get_worker_settings()
         pg_store_client = get_pgvectorstore()
         embedding_model = get_embedding_model()
-        
+
         query_vector = embedding_model.encode(query).tolist()
-        
+
         search_results = await pg_store_client.search(query_vector, worker_settings.RAG_TOP_K)
 
         if not search_results:
@@ -44,7 +42,7 @@ async def search_knowledge_base(ctx: RunContext, query: str) -> str:
 
         logger.debug(f"Knowledge base search completed — query='{query}'")
         return formatted_context
-        
+
     except Exception as e:
         logger.error(f"Failed to search knowledge base — query='{query}' error={e}")
         return "System error: unable to access the knowledge base at this time."

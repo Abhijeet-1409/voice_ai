@@ -1,6 +1,6 @@
 from livekit.agents import function_tool, RunContext
 
-from shared.config.logger import get_logger
+from shared.logging_setup.logger import get_logger
 from shared.infra.crm.mock import get_mockcrmclient
 
 
@@ -10,8 +10,8 @@ logger = get_logger(_LOGGER)
 
 @function_tool
 async def qualify_lead(
-        ctx: RunContext, 
-        track: str, 
+        ctx: RunContext,
+        track: str,
         contact: str,
         interest_summary: str
     ) -> str:
@@ -41,7 +41,7 @@ async def qualify_lead(
 
 @function_tool
 async def schedule_meeting(
-        ctx: RunContext, 
+        ctx: RunContext,
         contact: str,
         proposed_time: str
     ) -> str:
@@ -58,7 +58,7 @@ async def schedule_meeting(
     """
     try:
         schedule_date_time = f"{proposed_time} 10:00 AM"
-        
+
         logger.debug(f"Scheduled assessment meeting — contact={contact} proposed_time={proposed_time}")
         return f"Successfully scheduled the assessment meeting for {schedule_date_time}."
     except Exception as e:
@@ -68,7 +68,7 @@ async def schedule_meeting(
 
 @function_tool
 async def send_followup_email(
-        ctx: RunContext, 
+        ctx: RunContext,
         contact: str,
         track: str
     ) -> str:

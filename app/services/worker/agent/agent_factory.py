@@ -1,29 +1,26 @@
-from functools import cache
-
 from livekit.agents import Agent
 from livekit.agents.llm import FunctionTool
 
-from shared.config.logger import get_logger
-from shared.config.constants import CallType
+from shared.logging_setup.logger import get_logger
 
+from app.services.worker.schemas.session_data import UserData
 from domain.tools.knowledge_base import search_knowledge_base
 from domain.tools.crm import get_customer_profile, create_ticket
 from domain.tools.sales_qualification import qualify_lead, schedule_meeting, send_followup_email
-from domain.tools.system_prompt import SALES_QUALIFICATION_PROMPT, UNIFIED_INBOUND_PROMPT, DEFAULT_PROMPT
+from app.services.worker.domain.system_prompt import SALES_QUALIFICATION_PROMPT, UNIFIED_INBOUND_PROMPT, DEFAULT_PROMPT
 
 
 _LOGGER = "worker.agent.agent_factory"
 logger = get_logger(_LOGGER)
 
 
-@cache
-def build_agent(call_type: CallType) -> Agent:
+def build_agent(user_data: UserData) -> Agent:
     """
     Constructs and caches a LiveKit Agent tailored to a specific call type.
-    
-    The @cache decorator ensures that identical Agent configurations are 
-    reused for the same call types, saving memory and initialization overhead. 
-    Both the system prompt and the available tools are dynamically composed 
+
+    The @cache decorator ensures that identical Agent configurations are
+    reused for the same call types, saving memory and initialization overhead.
+    Both the system prompt and the available tools are dynamically composed
     based on whether the call is 'inbound' or 'outreach'.
 
     Args:
@@ -36,6 +33,8 @@ def build_agent(call_type: CallType) -> Agent:
 
     prompt: str = DEFAULT_PROMPT
     tool_list: list[FunctionTool] = [search_knowledge_base, send_followup_email]
+
+    call_type = user_data.call_type
 
     match call_type:
 
