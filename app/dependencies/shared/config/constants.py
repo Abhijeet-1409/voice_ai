@@ -43,8 +43,8 @@ class TicketStatus(StrEnum):
 class Track(StrEnum):
     """
     Enumeration of available AWS partner qualification tracks.
-    
-    These tracks categorize the primary objective or migration strategy 
+
+    These tracks categorize the primary objective or migration strategy
     assigned to a contact/lead in the sales funnel.
 
     Attributes:
@@ -56,11 +56,30 @@ class Track(StrEnum):
     GREEN_FIELD_MIGRATION = "green_field_migration"
     VMWARE_WORKLOAD_MIGRATION = "vmware_workload_migration"
 
-Channel = Literal["phone", "web"]      # source of the call (phone or browser)
-CallType = Literal["inbound", "outreach"]  # direction of the call
+class Channel(StrEnum):
+    """
+    Communication channels through which a user can interact with the agent.
+
+    Attributes:
+        WEB (str): Interaction originating from a web browser application.
+        PHONE (str): Interaction originating from a traditional telephone network (PSTN/SIP).
+    """
+    WEB = "web"
+    PHONE = "phone"
+
+class CallType(StrEnum):
+    """
+    Directionality of the call session.
+
+    Attributes:
+        INBOUND (str): A call initiated by the user and received by the agent.
+        OUTREACH (str): A proactive call initiated by the agent out to the user.
+    """
+    INBOUND = "inbound"
+    OUTREACH = "outreach"
 
 CUSTOMER_CACHE_TTL = 900          # 15 minutes in seconds
 CALL_SESSION_TTL = 21600          # 6 hours — safety TTL for Redis transcript
-GEMINI_KEY_COOLDOWN_SECONDS = 3600  # 1 hour — cooldown period for API key 
+GEMINI_KEY_COOLDOWN_SECONDS = 3600  # 1 hour — cooldown period for API key
 WEB_TOKEN_RATE_LIMIT = 10           # max token requests per user per window
 WEB_TOKEN_RATE_WINDOW_SECONDS = 60  # sliding window size in seconds
