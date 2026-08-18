@@ -64,7 +64,9 @@ class MockCRMClient(BaseCRMClient):
                     "phone_number": contact.phone_number,
                     "name": contact.name,
                     "email": contact.email,
-                    "lifecyclestage": contact.lifecyclestage
+                    "lifecyclestage": contact.lifecyclestage,
+                    "qualified": contact.qualified,
+                    "track": contact.track
                 }
         except SQLAlchemyError as sql_err:
             self.logger.error(f"Database error while fetching contact by phone {phone_number}: {sql_err}")
