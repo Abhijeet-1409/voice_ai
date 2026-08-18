@@ -4,7 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from shared.logging_setup import get_logger
-from shared.infra.vector_store import BaseVectorStore
+from shared.infra.vector_store import BaseVectorStore, VectorStoreError
 from shared.infra.postgres.database import get_async_sessionmaker
 
 
@@ -50,7 +50,7 @@ class PgVectorStore(BaseVectorStore):
 
         except SQLAlchemyError as e:
             self.logger.error(f"Vector search failed: {e}")
-            return []
+            raise VectorStoreError("Failed to search knowledge base due to a database error.") from e
 
     async def insert(self, content: str, vector: list[float]) -> None:
         """
@@ -79,7 +79,7 @@ class PgVectorStore(BaseVectorStore):
 
         except SQLAlchemyError as e:
             self.logger.error(f"Failed to insert chunk: {e}")
-            raise
+            raise VectorStoreError("Failed to insert chunk into knowledge base due to a database error.") from e
 
 
 @cache
