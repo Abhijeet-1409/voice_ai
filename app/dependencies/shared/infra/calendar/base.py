@@ -1,4 +1,7 @@
+from typing import Optional
 from abc import ABC, abstractmethod
+
+from shared.config import Track
 
 
 class CalendarClientError(Exception):
@@ -15,7 +18,7 @@ class BaseCalendarClient(ABC):
     """
 
     @abstractmethod
-    async def get_available_slots(self, track: str | None = None) -> list[str]:
+    async def get_available_slots(self, track: Optional[Track] = None) -> list[str]:
         """
         Return a list of human-readable available meeting slots.
 
@@ -30,7 +33,7 @@ class BaseCalendarClient(ABC):
         ...
 
     @abstractmethod
-    async def book_slot(self, slot: str, contact_email: str, track: str | None = None) -> bool:
+    async def book_slot(self, slot: str, contact_email: str, track: Optional[Track] = None) -> bool:
         """
         Book a previously offered slot.
 
