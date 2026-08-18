@@ -1,50 +1,71 @@
-from shared.infra.calendar.base import CalendarClientError
-from shared.infra.calendar.mock import MockCalendarClient
-from shared.logging_setup.logger import get_logger
+from typing import Optional
+
+from shared.logging_setup import get_logger
+from shared.config import Track
+from shared.infra.calendar import get_mockcalendarclient, CalendarClientError
 
 
 _LOGGER = "worker.utils.meeting_scheduler"
 logger = get_logger(_LOGGER)
 
 
-# Swap to the real Cal.com client here once shared/infra/calendar/calcom.py
-# exists, same BaseCalendarClient interface — no call-site changes needed.
-_calendar_client = MockCalendarClient()
-
-
-async def get_slots(track: str | None = None) -> list[str]:
+async def get_slots(track: Optional[Track] = None) -> list[str]:
     """
-    Fetch available meeting slots, optionally scoped to a track
-    (e.g. "aws_partner"). Returns [] on any failure — callers (schedule_meeting,
-    ChooseSlotTask) treat an empty list as "no slots available" and fall back
-    to an offer-to-follow-up-by-email response, never a raised exception.
+    Fetches available meeting slots for the given track.
+
+    Thin orchestration over the calendar client factory — swapping to a
+    real Cal.com implementation later means changing the one import
+    below, not every caller (Assistant.schedule_meeting, ChooseSlotTask).
+
+    Args:
+        track: Optional context (e.g. which offering track), passed
+            through to the calendar client. Unused by the current
+            stateless mock implementation.
+
+    Returns:
+        List of human-readable slot strings. Empty list if none
+        available or if the calendar client fails (fails soft — callers
+        should treat an empty list as "offer to follow up instead",
+        not crash the call).
     """
+    calendar_client = get_mockcalendarclient()
+
     try:
-        return await _calendar_client.get_available_slots(track=track)
+        slots = await calendar_client.get_available_slots(track=track)
+        logger.debug(f"Retrieved {len(slots)} available slots (track={track})")
+        return slots
     except CalendarClientError as e:
-        logger.warning("Failed to fetch available slots for track=%s: %s", track, e)
+        logger.error(f"Failed to fetch available slots (track={track}): {e}")
+        # Fail soft: an empty list lets the calling tool degrade
+        # gracefully ("no slots available, we'll follow up by email")
+        # rather than crashing the whole tool call over a calendar
+        # backend hiccup.
         return []
 
 
-async def confirm_booking(
-    slot: str,
-    contact_email: str,
-    track: str | None = None,
-) -> bool:
+async def confirm_booking(slot: str, contact_email: str, track: Optional[Track] = None) -> bool:
     """
-    Book the given slot for contact_email. Returns True/False rather than
-    raising — schedule_meeting calls this AFTER ctx.disallow_interruptions()
-    during the booking write, and needs a plain boolean to decide which of
-    two spoken confirmations to give (booked vs. apologize-and-offer-follow-up).
+    Books a previously offered slot.
+
+    Args:
+        slot: One of the strings previously returned by get_slots.
+        contact_email: Confirmed email to send the meeting invite to.
+        track: Optional context, passed through to the calendar client.
+
+    Returns:
+        True if booking succeeded, False otherwise (either a normal
+        booking failure or a calendar client error — both treated the
+        same way by the caller: apologize, offer to follow up by email).
     """
+    calendar_client = get_mockcalendarclient()
+
     try:
-        return await _calendar_client.book_slot(
-            slot=slot,
-            contact_email=contact_email,
-            track=track,
-        )
+        success = await calendar_client.book_slot(slot, contact_email, track=track)
+        if success:
+            logger.info(f"Booked slot={slot} contact_email={contact_email} track={track}")
+        else:
+            logger.warning(f"Booking returned failure — slot={slot} contact_email={contact_email}")
+        return success
     except CalendarClientError as e:
-        logger.error(
-            "Booking failed for slot=%s track=%s: %s", slot, track, e
-        )
+        logger.error(f"Failed to book slot={slot} contact_email={contact_email}: {e}")
         return False
