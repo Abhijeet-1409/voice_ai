@@ -3,6 +3,7 @@ from functools import cache
 from datetime import datetime, timedelta
 
 from shared.logging_setup import get_logger
+from shared.config import Track
 from shared.infra.calendar.base import BaseCalendarClient
 
 
@@ -43,7 +44,7 @@ class MockCalendarClient(BaseCalendarClient):
     def __init__(self):
         self.logger = get_logger(_LOGGER)
 
-    async def get_available_slots(self, track: Optional[str] = None) -> list[str]:
+    async def get_available_slots(self, track: Optional[Track] = None) -> list[str]:
         self.logger.debug(f"MockCalendar get_available_slots — track={track}")
         return _generate_dummy_slots()
 
@@ -51,7 +52,7 @@ class MockCalendarClient(BaseCalendarClient):
         self,
         slot: str,
         contact_email: str,
-        track: Optional[str] = None,
+        track: Optional[Track] = None,
     ) -> bool:
         self.logger.info(
             f"MockCalendar book_slot — slot={slot} contact_email={contact_email} track={track}"
