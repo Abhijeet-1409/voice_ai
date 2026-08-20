@@ -16,6 +16,17 @@ class LifecycleStage(StrEnum):
     OPPORTUNITY = "opportunity"
     CUSTOMER = "customer"
 
+# Defines the linear progression of a contact's lifecycle. 
+# Assigning a numeric weight to each stage allows for simple comparison logic 
+# (e.g., ensuring a contact only moves forward in the funnel and cannot 
+# regress from a CUSTOMER back to a LEAD).
+LIFECYCLE_STAGE_ORDER: dict[LifecycleStage, int] = {
+    LifecycleStage.LEAD: 0,
+    LifecycleStage.SALES_QUALIFIED_LEAD: 1,
+    LifecycleStage.OPPORTUNITY: 2,
+    LifecycleStage.CUSTOMER: 3,
+}
+
 class TicketPriority(StrEnum):
     """
     Priority levels indicating the urgency and required response time for a support ticket.
