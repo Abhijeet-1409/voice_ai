@@ -78,6 +78,7 @@ async def save_tool_log(
             )
             session.add(log)
             await session.commit()
+            await session.refresh()
             logger.info(f"Saved tool log — stream_sid={stream_sid} tool={tool_name} latency={latency_ms}ms")
 
     except JSONDecodeError as e:

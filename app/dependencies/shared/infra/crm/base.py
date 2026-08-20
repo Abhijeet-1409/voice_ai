@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from shared.config import TicketPriority, TicketStatus
+from shared.config import TicketPriority, TicketStatus, LifecycleStage, Track
 
 
 class CRMClientError(Exception):
@@ -82,22 +82,29 @@ class BaseCRMClient(ABC):
     async def create_contact(
         self,
         phone_number: str,
+        lifecyclestage: LifecycleStage = LifecycleStage.LEAD,
+        qualified: bool = False,
         name: Optional[str] = None,
         email: Optional[str] = None,
+        track: Optional[Track] = None,
     ) -> str:
         """
-        Create a new contact.
+        Create a new contact in the CRM.
 
         Args:
-            phone_number: Normalized phone number, the sole identifier.
+            phone_number: Normalized phone number, the sole primary identifier.
+            lifecyclestage: Initial lifecycle stage of the contact.
+            qualified: Whether the lead has passed initial qualification criteria. Defaults to False.
             name: Caller's name, if known at creation time.
             email: Caller's email, if known at creation time.
+            track: Specific focus track (e.g., AWS partner track), if assigned at creation time.
 
         Returns:
             The new contact's unique ID.
 
         Raises:
             ContactAlreadyExistsError: If phone_number is already in use.
+            CRMClientError: If the creation fails due to underlying storage errors.
         """
         ...
 
@@ -140,22 +147,36 @@ class BaseCRMClient(ABC):
         ...
 
     @abstractmethod
-    async def get_tickets(self, contact_id: str, status: Optional[TicketStatus] = None) -> list[dict]:
+    async def get_tickets(
+        self,
+        contact_id: str,
+        status: Optional[TicketStatus] = None,
+        limit: int = 5,
+    ) -> list[dict]:
         """
-        Fetch tickets for a contact, optionally filtered by status.
-
-        Used by Support Flow to check a caller's existing issues (open or
-        otherwise) before logging a new one.
-
+        Fetch a contact's most recent tickets, optionally filtered by
+        status. Results are ordered most-recent-first, so the first
+        item is the contact's "last ticket".
+ 
+        Used by Support Flow to check a caller's existing issues (open
+        or otherwise) before logging a new one, or when the caller asks
+        about a previous ticket's status.
+ 
         Args:
             contact_id: The contact's unique ID.
             status: If provided, only tickets matching this status are
                 returned (e.g. TicketStatus.OPEN). If None, all tickets
                 for the contact are returned regardless of status.
-
+            limit: Maximum number of tickets to return, most recent
+                first. Defaults to 5 — deliberately capped so callers
+                (voice agent tools) aren't overwhelmed with a caller's
+                full ticket history; older tickets are expected to be
+                checked via a separate portal, not read aloud.
+ 
         Returns:
-            A list of dicts, each representing one matching ticket.
-
+            A list of dicts, each representing one matching ticket,
+            ordered most-recent-first, at most `limit` items.
+ 
         Raises:
             ContactNotFoundError: If no contact exists with contact_id.
         """

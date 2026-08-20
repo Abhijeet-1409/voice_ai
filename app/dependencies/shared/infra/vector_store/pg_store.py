@@ -13,7 +13,11 @@ _LOGGER = "infra.vector_store.pg_store"
 
 class PgVectorStore(BaseVectorStore):
     """
-    Vector store implementation using PostgreSQL with the pgvector extension.
+    Vector store implementation using PostgreSQL with the pgvector
+    extension. Backs domain/tools/knowledge_base.py's search_knowledge_base
+    tool. Implements BaseVectorStore, so this is a drop-in replacement
+    for a different vector store backend later — same interface,
+    different implementation.
     """
 
     def __init__(self):
@@ -21,16 +25,6 @@ class PgVectorStore(BaseVectorStore):
         self.async_session = get_async_sessionmaker()
 
     async def search(self, query_vector: list[float], top_k: int = 3) -> list[str]:
-        """
-        Search for semantically similar text chunks in PostgreSQL using pgvector.
-
-        Args:
-            query_vector (list[float]): The dense query embedding vector.
-            top_k (int, optional): The number of near neighbors to return. Defaults to 3.
-
-        Returns:
-            list[str]: Plain text chunks ordered by cosine/L2 distance matching.
-        """
 
         try:
             async with self.async_session() as session:
@@ -52,34 +46,29 @@ class PgVectorStore(BaseVectorStore):
             self.logger.error(f"Vector search failed: {e}")
             raise VectorStoreError("Failed to search knowledge base due to a database error.") from e
 
-    async def insert(self, content: str, vector: list[float]) -> None:
-        """
-        Insert a raw text chunk alongside its high-dimensional vector.
-
-        Args:
-            content (str): The plain text documentation/context chunk.
-            vector (list[float]): Dense float list representing the vector embedding.
-
-        Raises:
-            SQLAlchemyError: If the transaction or commit step fails.
-        """
+    async def insert(self, items: list[tuple[str, list[float]]]) -> None:
+    
+        if not items:
+            self.logger.debug("insert called with an empty list — nothing to do.")
+            return
 
         try:
             async with self.async_session() as session:
-
                 await session.execute(
                     text("""
                         INSERT INTO knowledge_base (content, embedding)
                         VALUES (:content, :vector)
                     """),
-                    {"content": content, "vector": vector}
+                    [{"content": content, "vector": vector} for content, vector in items]
                 )
                 await session.commit()
-                self.logger.debug("Inserted chunk into knowledge base")
+                self.logger.debug(f"Inserted {len(items)} chunk(s) into knowledge base")
 
         except SQLAlchemyError as e:
-            self.logger.error(f"Failed to insert chunk: {e}")
-            raise VectorStoreError("Failed to insert chunk into knowledge base due to a database error.") from e
+            self.logger.error(f"Failed to insert {len(items)} chunk(s): {e}")
+            raise VectorStoreError(
+                f"Failed to insert {len(items)} chunk(s) into knowledge base due to a database error."
+            ) from e
 
 
 @cache

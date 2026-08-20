@@ -60,6 +60,7 @@ async def save_transcript(
             )
             session.add(transcript)
             await session.commit()
+            await session.refresh()
             logger.info(f"Saved transcript — stream_sid={stream_sid} turns={len(turns)}")
 
     except SQLAlchemyError as e:

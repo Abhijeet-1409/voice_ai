@@ -32,14 +32,14 @@ class Contact(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     phone_number: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    name: Mapped[str | None] = mapped_column(String(255), default=None, nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), default=None, nullable=True)
 
     lifecyclestage: Mapped[LifecycleStage] = mapped_column(String,
         default=LifecycleStage.LEAD, nullable=False
     )
     track: Mapped[Optional[Track]] = mapped_column(String, default=None, nullable=True)
-    qualified: Mapped[bool] = mapped_column(Boolean, default=False)
+    qualified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
