@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 
-from shared.config import TicketPriority, TicketStatus
+from shared.config import TicketPriority, TicketStatus, LifecycleStage, Track
 
 
 class CRMClientError(Exception):
@@ -82,22 +82,29 @@ class BaseCRMClient(ABC):
     async def create_contact(
         self,
         phone_number: str,
+        lifecyclestage: LifecycleStage = LifecycleStage.LEAD,
+        qualified: bool = False,
         name: Optional[str] = None,
         email: Optional[str] = None,
+        track: Optional[Track] = None,
     ) -> str:
         """
-        Create a new contact.
+        Create a new contact in the CRM.
 
         Args:
-            phone_number: Normalized phone number, the sole identifier.
+            phone_number: Normalized phone number, the sole primary identifier.
+            lifecyclestage: Initial lifecycle stage of the contact.
+            qualified: Whether the lead has passed initial qualification criteria. Defaults to False.
             name: Caller's name, if known at creation time.
             email: Caller's email, if known at creation time.
+            track: Specific focus track (e.g., AWS partner track), if assigned at creation time.
 
         Returns:
             The new contact's unique ID.
 
         Raises:
             ContactAlreadyExistsError: If phone_number is already in use.
+            CRMClientError: If the creation fails due to underlying storage errors.
         """
         ...
 
