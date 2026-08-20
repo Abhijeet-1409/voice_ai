@@ -31,19 +31,21 @@ class UserData(BaseModel):
 
     CRM-mirrored fields (customer_id, name, email, track, qualified,
     lifecyclestage) intentionally mirror shared.infra.postgres.contact.Contact
-    one-to-one. This lets the agent read/update contact state in-memory
-    during the call without a CRM round-trip on every check, while
-    domain/tools/crm.py is responsible for keeping the actual CRM record
-    in sync via update_contact whenever these fields change mid-call.
+    one-to-one. Tools mutate these fields directly, in-memory, during the
+    call — there is NO mid-call CRM write. The actual CRM record is only
+    created or updated ONCE, at call end (event_handlers.py's on_close),
+    via utils/customer_lookup.py's create_customer (new caller) or
+    update_customer (existing caller, customer_id already set). This
+    keeps every CRM write off the live, latency-sensitive call path.
 
     Population differs by channel (see design decision):
       - PHONE: channel, phone, and all CRM-mirrored fields are populated
-        by job_entrypoint.py BEFORE the agent joins, via get_contact()/
-        create_contact() using the phone number from room metadata.
-      - WEB: channel and clerk_id are set at construction; phone and all
-        CRM-mirrored fields start None and are populated mid-call, once
-        get_customer_profile (domain/tools/crm.py) collects a phone
-        number from the caller and performs the same CRM lookup.
+        by job_entrypoint.py BEFORE the agent joins, via lookup_customer()
+        using the phone number from room metadata. If not found,
+        customer_id stays None for the whole call — creation is deferred
+        to call end, not attempted mid-call.
+      - WEB (not yet in scope — SIP/phone only for now): would start
+        with CRM-mirrored fields empty and populate them mid-call.
     """
 
     model_config = {
@@ -57,16 +59,25 @@ class UserData(BaseModel):
     stream_sid: str
 
     # --- Identity ---
-    clerk_id: Optional[str] = None       # web channel only
-    phone: Optional[str] = None          # always set for phone channel; set mid-call for web
+    clerk_id: Optional[str] = None       # web channel only, not yet in scope
+    phone: Optional[str] = None          # always set for phone channel from SIP metadata
 
     # --- CRM-mirrored fields (mirrors shared.infra.postgres.contact.Contact) ---
+    # None/False/LEAD if no matching contact was found — customer_id
+    # stays None until call end for a genuinely new caller.
     customer_id: Optional[str] = None
     name: Optional[str] = None
     email: Optional[str] = None
     track: Optional[Track] = None
     qualified: bool = False
     lifecyclestage: LifecycleStage = LifecycleStage.LEAD
+
+    # --- Call-specific qualification context (NOT on Contact — see
+    # domain/tools/sales_qualification.py's qualify_lead docstring.
+    # Written to call_log at call end, not the contact record, since
+    # it describes why THIS call resulted in qualification, not a
+    # permanent contact attribute) ---
+    qualification_summary: Optional[str] = None
 
     # --- Scheduling state (in-session; not on Contact itself) ---
     meeting_scheduled: bool = False

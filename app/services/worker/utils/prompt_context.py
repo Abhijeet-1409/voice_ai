@@ -20,6 +20,7 @@ def build_user_context_block(userdata: UserData) -> str:
         A formatted multi-line string ready to fill {user_context}.
     """
     return (
+        f"Customer_id: {userdata.customer_id or 'Unknown'}\n"
         f"Contact name: {userdata.name or 'Unknown'}\n"
         f"Phone number: {userdata.phone or 'Unknown'}\n"
         f"Email: {userdata.email or 'Unknown'}\n"
