@@ -4,12 +4,11 @@ from typing import Optional
 from pydantic import BaseModel
 from pydantic_core import ValidationError
 
-from sqlalchemy import CursorResult, Result, select, update
-from sqlalchemy.orm import selectinload
+from sqlalchemy import Result, select, update
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from shared.logging_setup import get_logger
-from shared.config import TicketPriority, LifecycleStage, TicketStatus, Track
+from shared.config import TicketPriority, LifecycleStage, TicketStatus, Track, LIFECYCLE_STAGE_ORDER
 from shared.infra.postgres import Contact, Ticket
 from shared.infra.postgres.database import get_async_sessionmaker
 from shared.infra.crm import BaseCRMClient, CRMClientError, ContactNotFoundError, ContactAlreadyExistsError
@@ -110,14 +109,17 @@ class MockCRMClient(BaseCRMClient):
 
         This method accepts a dictionary of data, validates it against the
         ContactUpdateSchema, and applies partial updates to the contact.
-        Only the fields explicitly provided in the dictionary will be modified.
+        Only the fields explicitly provided in the dictionary will be
+        modified.
 
-        The `data` dictionary can include the following optional fields:
-            - name (str): The contact's full name.
-            - email (str): The contact's email address.
-            - track (Track): The specific track or segment the contact belongs to.
-            - qualified (bool): Indicates whether the contact is a qualified lead.
-            - lifecyclestage (LifecycleStage): The current lifecycle stage of the contact.
+        Includes two regression guards, since both fields represent one-way
+        progress rather than freely overwritable values:
+            - `qualified` can only move from False to True, never back.
+            - `lifecyclestage` can only move forward per LIFECYCLE_STAGE_ORDER
+            (lead -> sales_qualified_lead -> opportunity -> customer), never
+            backward. A contact already at 'customer' stays there even if a
+            later, unrelated call's data would otherwise set it back to
+            'lead'.
 
         Args:
             contact_id (str): The unique identifier of the contact to update.
@@ -139,18 +141,47 @@ class MockCRMClient(BaseCRMClient):
                 raise CRMClientError(f"No valid fields provided to update for contact {contact_id}.")
 
             async with self.async_session() as session:
+                existing = await session.get(Contact, contact_id)
+
+                if existing is None:
+                    raise ContactNotFoundError(contact_id)
+
+                # Regression guard: never let qualified go True -> False.
+                if "qualified" in clean_data and existing.qualified and not clean_data["qualified"]:
+                    self.logger.debug(
+                        f"Dropping qualified=False update for contact {contact_id} — "
+                        f"already qualified, refusing to regress."
+                    )
+                    del clean_data["qualified"]
+
+                # Regression guard: never let lifecyclestage move backward.
+                if "lifecyclestage" in clean_data:
+                    existing_rank = LIFECYCLE_STAGE_ORDER[existing.lifecyclestage]
+                    new_rank = LIFECYCLE_STAGE_ORDER[clean_data["lifecyclestage"]]
+                    if new_rank < existing_rank:
+                        self.logger.debug(
+                            f"Dropping lifecyclestage regression for contact {contact_id} — "
+                            f"{existing.lifecyclestage} -> {clean_data['lifecyclestage']} not allowed."
+                        )
+                        del clean_data["lifecyclestage"]
+
+                if not clean_data:
+                    self.logger.info(
+                        f"No changes to apply for contact {contact_id} after regression guards."
+                    )
+                    return
+
                 stmt = (
                     update(Contact)
                     .where(Contact.id == contact_id)
                     .values(**clean_data)
                 )
-                result: CursorResult = await session.execute(stmt)
-
-                if result.rowcount == 0:
-                    raise ContactNotFoundError(contact_id)
-
+                await session.execute(stmt)
                 await session.commit()
-                self.logger.info(f"Contact {contact_id} updated successfully with fields: {list(clean_data.keys())}")
+
+                self.logger.info(
+                    f"Contact {contact_id} updated successfully with fields: {list(clean_data.keys())}"
+                )
 
         except ValidationError as val_err:
             self.logger.error(f"Validation error while updating contact {contact_id}: {val_err}")
@@ -188,37 +219,43 @@ class MockCRMClient(BaseCRMClient):
             self.logger.error(f"Database error while creating ticket for contact {contact_id}: {sql_err}")
             raise CRMClientError(f"Failed to create ticket for contact {contact_id} due to a database error.") from sql_err
 
-    async def get_tickets(self, contact_id: str, status: Optional[TicketStatus] = None) -> list[dict]:
+    async def get_tickets(
+        self,
+        contact_id: str,
+        status: Optional[TicketStatus] = None,
+        limit: int = 5,
+    ) -> list[dict]:
         try:
             async with self.async_session() as session:
-                stmt = (
-                    select(Contact)
-                    .where(Contact.id == contact_id)
-                    .options(selectinload(Contact.tickets))
-                )
-                result: Result[Contact] = await session.execute(stmt)
-                contact: Optional[Contact] = result.scalar_one_or_none()
-
-                if contact is None:
+                existing = await session.get(Contact, contact_id)
+                if existing is None:
                     raise ContactNotFoundError(contact_id)
 
-                all_tickets = [
+                stmt = select(Ticket).where(Ticket.contact_id == contact_id)
+
+                if status is not None:
+                    stmt = stmt.where(Ticket.status == status)
+
+                stmt = stmt.order_by(Ticket.created_at.desc()).limit(limit)
+
+                result: Result[Ticket] = await session.execute(stmt)
+                tickets = result.scalars().all()
+
+                formatted = [
                     {
-                        "id": ticket.id,
-                        "description": ticket.description,
-                        "priority": ticket.priority,
-                        "status": ticket.status,
+                        "id": t.id,
+                        "description": t.description,
+                        "priority": t.priority,
+                        "status": t.status,
                     }
-                    for ticket in contact.tickets
+                    for t in tickets
                 ]
 
-                if status is None:
-                    self.logger.info(f"Retrieved {len(all_tickets)} total tickets for contact {contact_id}")
-                    return all_tickets
-
-                filtered_tickets = [ticket for ticket in all_tickets if ticket["status"] == status]
-                self.logger.info(f"Retrieved {len(filtered_tickets)} {status.value} tickets for contact {contact_id}")
-                return filtered_tickets
+                self.logger.info(
+                    f"Retrieved {len(formatted)} tickets for contact {contact_id} "
+                    f"(status={status.value if status else 'any'}, limit={limit})"
+                )
+                return formatted
 
         except SQLAlchemyError as sql_err:
             self.logger.error(f"Database error while retrieving tickets for contact {contact_id}: {sql_err}")
