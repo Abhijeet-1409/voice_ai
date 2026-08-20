@@ -97,6 +97,7 @@ async def save_call_log(
             )
             session.add(call)
             await session.commit()
+            await session.refresh()
             logger.info(f"Saved call log — stream_sid={stream_sid}")
 
     except SQLAlchemyError as e:
