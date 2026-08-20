@@ -72,13 +72,23 @@ class MockCRMClient(BaseCRMClient):
             self.logger.error(f"Database error while fetching contact by phone {phone_number}: {sql_err}")
             raise CRMClientError("Failed to fetch contact due to a database error.") from sql_err
 
-    async def create_contact(self, phone_number: str, name: Optional[str] = None, email: Optional[str] = None) -> str:
+    async def create_contact(self, 
+            phone_number: str,
+            lifecyclestage: LifecycleStage = LifecycleStage.LEAD,
+            qualified: bool = False,
+            name: Optional[str] = None, 
+            email: Optional[str] = None,
+            track: Optional[Track] = None,
+        ) -> str:
         try:
             async with self.async_session() as session:
                 contact = Contact(
                     phone_number=phone_number,
+                    lifecyclestage=lifecyclestage,
+                    qualified=qualified,
                     name=name,
-                    email=email
+                    email=email,
+                    track=track
                 )
                 session.add(contact)
                 await session.commit()
