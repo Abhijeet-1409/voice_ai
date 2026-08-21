@@ -4,85 +4,107 @@ from functools import partial
 from livekit.plugins import noise_cancellation
 from livekit.agents import room_io, AutoSubscribe, JobContext
 
+from shared.call_context import stream_sid_var
+from shared.logging_setup import get_logger
+from shared.config import CallType, Channel
 
-from shared.logging_setup.logger import get_logger, stream_sid_var
-from shared.config.constants import CallType, Channel
-
-
-from app.services.worker.schemas.session_data import UserData
-from agent.agent_factory import build_agent
-from agent.session import create_agent_session
-from agent.key_selector import select_gemini_key
-from agent.handlers import conversation_item_added_event_handler, close_event_handler, error_event_handler
+from schemas import UserData
+from agent import build_agent, create_agent_session, select_gemini_key
+from agent import on_close, on_error, on_conversation_item_added, on_function_tools_executed
+from utils import lookup_customer, apply_contact_to_userdata
 
 
 _LOGGER = "worker.agent.entrypoint"
 logger = get_logger(_LOGGER)
 
 
-async def _entrypoint(ctx: JobContext):
+async def entrypoint(ctx: JobContext) -> None:
     """
+    Per-call entrypoint, registered via @server.rtc_session(). Connects to
+    the room, resolves call metadata, builds the AgentSession + Assistant
+    for this call, registers event handlers, and starts the session.
     """
     try:
+        # connect to the room first — metadata isn't reliably readable
+        # until the room connection is established
+        await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
-        # select gemini_key
-        gemini_key = await select_gemini_key()
-
-        # connect to the room
-        ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-
-        # extracting channel and call_type from metadata
-        metadata: dict = json.load(ctx.room.metadata)
+        # extract call metadata
+        metadata: dict = json.loads(ctx.room.metadata or "{}")
         stream_sid: str = metadata.get("stream_sid")
         channel: Channel = metadata.get("channel")
         call_type: CallType = metadata.get("call_type")
 
-        # create a user_data object
-        user_data = UserData(
-            channel=channel,
-            call_type=call_type,
-            stream_sid=stream_sid,
-            clerk_id=metadata.get("clerk_id"),
-            phone=metadata.get("phone"),
-            email=metadata.get("email"),
-        )
-
-        # setting stream_sid context var
+        # set stream_sid in logging context as early as possible, so every
+        # subsequent log line in this call (including from key selection)
+        # carries the right stream_sid
         stream_sid_var.set(stream_sid)
 
-        # create a agent session
+        # select a gemini key — sync, no await
+        gemini_key = select_gemini_key()
+
+        # look up the caller by phone — pure lookup, never creates
+        phone = metadata.get("phone")
+        contact = await lookup_customer(phone) if phone else None
+
+        # build user_data from the found contact if one exists, otherwise
+        # from metadata alone — customer_id stays None in that case, and a
+        # new contact is only created at call end (see
+        # event_handlers._end_of_call_writes)
+        if contact is not None:
+            user_data = UserData(
+                channel=channel,
+                call_type=call_type,
+                stream_sid=stream_sid,
+                clerk_id=metadata.get("clerk_id"),
+                phone=phone,
+                email=contact.get("email") or metadata.get("email"),
+                customer_id=contact.get("id"),
+                name=contact.get("name"),
+            )
+        else:
+            user_data = UserData(
+                channel=channel,
+                call_type=call_type,
+                stream_sid=stream_sid,
+                clerk_id=metadata.get("clerk_id"),
+                phone=phone,
+                email=metadata.get("email"),
+            )
+
+        # create the agent session and the configured assistant
         session = create_agent_session(gemini_key, user_data)
-
-        # register conversation_item_added_event_handler func for conversation_item_added event on session object
-        session.on("conversation_item_added", partial(conversation_item_added_event_handler, stream_sid = stream_sid))
-
-        # register close_event_handler func for close event on session object
-        session.on("close", partial(close_event_handler, stream_sid = stream_sid))
-
-        # register close_event_handler func for error event on session object
-        session.on("error", partial(error_event_handler, stream_sid = stream_sid))
-
-        # create a agent object
         agent = build_agent(user_data)
 
-        # Start the session with noise cancellation enabled
+        # register event handlers
+        session.on(
+            "conversation_item_added",
+            partial(on_conversation_item_added, stream_sid=stream_sid),
+        )
+        session.on(
+            "close",
+            partial(on_close, stream_sid=stream_sid, userdata=user_data),
+        )
+        session.on(
+            "function_tools_executed",
+            partial(on_function_tools_executed, userdata=user_data),
+        )
+        session.on(
+            "error",
+            partial(on_error, stream_sid=stream_sid),
+        )
+
+        # start the session with noise cancellation enabled
         await session.start(
             agent=agent,
             room=ctx.room,
             room_options=room_io.RoomOptions(
                 audio_input=room_io.AudioInputOptions(
-                    noise_cancellation=noise_cancellation.BVC(),  # Background voice cancellation
+                    noise_cancellation=noise_cancellation.BVC(),
                 ),
             ),
         )
 
-        ctx.add_shutdown_callback()
-
     except Exception as e:
-        logger.error()
+        logger.error("Error occurred in entrypoint", exc_info=True)
         raise
-
-
-
-
-
