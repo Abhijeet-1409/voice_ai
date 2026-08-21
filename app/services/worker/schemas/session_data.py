@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from livekit.agents.voice import CloseReason
 
-from shared.config.constants import Channel, CallType, Track, LifecycleStage
+from shared.config import Channel, CallType, Track, LifecycleStage
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,8 @@ class ToolCallRecord:
     tool_name: str
     arguments: dict[str, Any]
     result: str
+    is_error: bool
+    error_message: Optional[str] = None
     called_at: datetime = dc_field(default_factory=lambda: datetime.now(timezone.utc))
 
 
