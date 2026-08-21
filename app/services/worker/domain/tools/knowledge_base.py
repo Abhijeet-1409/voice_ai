@@ -6,7 +6,7 @@ from shared.logging_setup import get_logger
 from shared.infra.vector_store import get_pgvectorstore, VectorStoreError
 
 from config import get_worker_settings
-from utils import get_embedding_model
+from rag import get_embedding_model
 
 
 _LOGGER = "worker.domain.tools.knowledge_base"
