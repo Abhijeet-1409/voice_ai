@@ -1,22 +1,29 @@
+import logging
+
 from livekit.agents import AgentServer, JobProcess, JobContext, cli
 
-from worker.agent.job_entrypoint import _entrypoint
+from worker.agent.job_entrypoint import entrypoint as _entrypoint
 from worker.config.worker_settings import get_worker_settings
 
-from shared.logging_setup.logger import get_logger
 from shared.infra.postgres import db_init
 from shared.infra.redis import ping_redis
 
+from rag import get_embedding_model
 
-__LOGGER = "worker.agent_runner"
-logger = get_logger(__LOGGER)
+settings = get_worker_settings()
+
+logger = logging.getLogger("worker.agent_runner")
+logger.setLevel(settings.LOG_LEVEL)
+if not logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setLevel(settings.LOG_LEVEL)
+    _handler.setFormatter(logging.Formatter(settings.LOG_FORMAT, settings.DATA_FORMAT))
+    logger.addHandler(_handler)
 
 
 # Load environment-specific worker configurations and initialize the LiveKit AgentServer.
 # Explicitly passing the API key, secret, and URL ensures the worker connects to the
 # correct LiveKit instance, bypassing the need for default environment variable fallbacks.
-settings = get_worker_settings()
-
 server = AgentServer(
     api_key=settings.LIVEKIT_API_KEY,
     api_secret=settings.LIVEKIT_API_SECRET,
@@ -49,6 +56,10 @@ async def prewarm(proc: JobProcess):
             raise RuntimeError("Redis unreachable at startup — transcript storage unavailable")
 
         logger.info("Redis connection verified. Prewarm sequence complete.")
+
+        logger.info("Loading embedding model...")
+        get_embedding_model()
+        logger.info("Embedding model loaded and cached.")
 
     except Exception as e:
         logger.critical(f"Fatal error during prewarm: {e}")
