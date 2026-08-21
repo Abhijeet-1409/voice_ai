@@ -12,6 +12,9 @@ class WorkerSettings(AppBaseSettings):
     knowledge base (RAG) parameters.
     """
 
+    # ── Agent ────────────────────────────────────────────────────────────────────
+    AGENT_NAME: str
+
     # ── LLM ────────────────────────────────────────────────────────────────────
     GEMINI_API_KEY_1: str
     GEMINI_API_KEY_2: str
