@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────
+# Worker Service — Requirements
+# Extracted from base project requirements.txt — worker-specific only.
+# No FastAPI/uvicorn/websockets/requests/multipart here — those belong
+# to the bridge/API service, not this agent process.
+# ─────────────────────────────────────────────
+# Install: pip install -r requirements.txt
+
+# ── Config / Validation ───────────────────────
+pydantic==2.13.0
+pydantic-settings==2.14.2
+
+# ── LiveKit Core, Agents & Google Gemini Plugin ───────────────
+livekit==1.1.12                 # Core Python WebRTC SDK (Pinned for agents compatibility)
+livekit-agents~=1.6.4           # Realtime Voice AI Agents Framework
+livekit-agents[cartesia]~=1.5
+livekit-plugins-google~=1.6.4   # Google Cloud & Gemini Live Realtime Plugin (Auto-pulls compatible google-genai)
+livekit-plugins-noise-cancellation~=0.2       # Background noise cancellation plugin
+livekit-agents[silero,turn-detector]~=1.6.4   # Agents framework with local VAD and turn detection extras
+
+# ── State Management / Caching ────────────────
+redis==5.2.1               # Redis client (includes redis.asyncio support) — currently
+                            # unused by key_selector.py (manual key selection), still
+                            # required by shared/infra/redis's other modules.
+
+# ── RAG — Embeddings ──────────────────────────
+sentence-transformers==3.0.1
+
+# ── DATABASE ───────────────────────────────────
+alembic==1.13.1
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+pgvector==0.3.6
+
+# ── Environment Variables ─────────────────────
+python-dotenv==1.0.1       # Load .env file for local development
