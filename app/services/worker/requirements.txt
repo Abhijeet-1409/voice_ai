@@ -26,6 +26,10 @@ redis==5.2.1               # Redis client (includes redis.asyncio support) — c
 # ── RAG — Embeddings ──────────────────────────
 sentence-transformers==3.0.1
 
+# ── RAG — Ingest (reads .xlsx source files for knowledge base population) ──
+pandas==2.2.3
+openpyxl==3.1.5            # required by pandas for .xlsx engine support
+
 # ── DATABASE ───────────────────────────────────
 alembic==1.13.1
 sqlalchemy==2.0.36
