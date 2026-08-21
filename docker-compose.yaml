@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  # ── Infrastructure: Postgres with pgvector ─────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: voice_ai_postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-voice_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Infrastructure: Redis Cache & Session Store ─────────
+  redis:
+    image: redis:7-alpine
+    container_name: voice_ai_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── Database Migrations (Applies Alembic & Exits) ───────
+  migrations:
+    build:
+      context: ./app
+      dockerfile: services/worker/Dockerfile
+    container_name: voice_ai_migrations
+    restart: "no"
+    env_file:
+      - .env
+    working_dir: /app/dependencies/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: alembic upgrade head
+
+  # ── LiveKit Agent Worker Service ────────────────────────
+  worker:
+    build:
+      context: ./app
+      dockerfile: services/worker/Dockerfile
+    container_name: voice_ai_worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - AGENT_MODE=${AGENT_MODE:-start}
+    volumes:
+      - ./rag_models:/app/rag_models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    stdin_open: true
+    tty: true
+
+  # ── One-Off Tool: Knowledge Base Ingestion Script ──────
+  ingest:
+    build:
+      context: ./app
+      dockerfile: services/worker/Dockerfile
+    container_name: voice_ai_ingest
+    profiles: ["tools"]
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./rag_models:/app/rag_models
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+    command: python -m rag.ingest
+
+volumes:
+  postgres_data:
+  redis_data:
