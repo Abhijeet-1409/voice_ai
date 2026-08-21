@@ -4,6 +4,7 @@ from shared.logging_setup import get_logger
 from shared.config import CallType, Track, TicketPriority, TicketStatus
 
 from agent import Assistant
+from config import get_worker_settings
 from schemas.session_data import UserData
 from utils import build_user_context_block, describe_all
 from domain import OUTREACH_PROMPT, INBOUND_PROMPT, DEFAULT_PROMPT
@@ -32,12 +33,13 @@ def build_agent(user_data: UserData) -> Assistant:
       - unrecognized call_type: falls back to DEFAULT_PROMPT with
         COMMON_TOOLS only.
 
-    The chosen prompt template is rendered with two injections:
+    The chosen prompt template is rendered with three injections:
       - {user_context}: this call's UserData, via build_user_context_block.
       - {enum_reference}: valid values for the enums this flow's tools
         actually use, via describe_all — Track only for outreach,
         Track + TicketPriority + TicketStatus for inbound, omitted
         for the default fallback (no enum-typed tool params there).
+      - {agent_name}: the assistant's spoken name, from WorkerSettings.
 
     schedule_meeting is NOT part of the tool lists here — it's a bound
     method on Assistant itself (needs self.chat_ctx to hand conversation
@@ -51,6 +53,7 @@ def build_agent(user_data: UserData) -> Assistant:
     Returns:
         Assistant: A configured Assistant instance.
     """
+    settings = get_worker_settings()
     call_type = user_data.call_type
 
     match call_type:
@@ -73,6 +76,7 @@ def build_agent(user_data: UserData) -> Assistant:
     instructions = prompt_template.format(
         user_context=build_user_context_block(user_data),
         enum_reference=enum_reference,
+        agent_name=settings.AGENT_NAME,
     )
 
     assistant = Assistant(instructions=instructions, tools=tool_list)
