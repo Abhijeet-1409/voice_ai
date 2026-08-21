@@ -38,6 +38,9 @@ class WorkerSettings(AppBaseSettings):
     GMAIL_APP_PASSWORD: str
     NOTIFICATION_EMAIL: str
 
+    # ── Data ───────────────────────────────────────────────────────────────────
+    DATA_DIR: str 
+
     # ── Rag ────────────────────────────────────────────────────────────────────
     EMBEDDING_MODEL_NAME: str
     EMBEDDING_MODEL_PATH: str
