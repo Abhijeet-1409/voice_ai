@@ -65,7 +65,7 @@ async def create_user(
             )
             session.add(user)
             await session.commit()
-            await session.refresh()
+            await session.refresh(user)
             logger.info(f"Created user — clerk_user_id={clerk_user_id}")
     except SQLAlchemyError as e:
         logger.error(f"Failed to create user — clerk_user_id={clerk_user_id} error={e}")
