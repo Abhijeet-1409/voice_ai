@@ -2,8 +2,8 @@ import logging
 
 from livekit.agents import AgentServer, JobProcess, JobContext, cli
 
-from worker.agent.job_entrypoint import entrypoint as _entrypoint
-from worker.config.worker_settings import get_worker_settings
+from agent.job_entrypoint import entrypoint as _entrypoint
+from config.worker_settings import get_worker_settings
 
 from shared.infra.postgres import db_init
 from shared.infra.redis import ping_redis
