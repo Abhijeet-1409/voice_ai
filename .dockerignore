@@ -1,0 +1,36 @@
+# Python bytecode/cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments — never copy a host-built venv into the image
+bot_venv/
+venv/
+.venv/
+
+# Package build artifacts
+*.egg-info/
+dist/
+build/
+
+# Version control
+.git/
+.gitignore
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# Env files — injected via docker-compose env_file, not baked into the image
+.env
+old.env
+sample.env
+
+# Docs — not needed at runtime
+docs/
+README.md
+
+# OS cruft
+.DS_Store
+Thumbs.db
