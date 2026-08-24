@@ -1,0 +1,29 @@
+# ─────────────────────────────────────────────
+# Worker Service — Runtime Requirements
+# ─────────────────────────────────────────────
+
+# Config / Validation
+pydantic==2.13.0
+pydantic-settings==2.14.2
+
+# LiveKit Core / Agent / Plugins
+livekit==1.1.12
+livekit-agents~=1.6.4
+livekit-agents[cartesia]~=1.5
+livekit-plugins-google~=1.6.4
+livekit-plugins-noise-cancellation~=0.2
+livekit-agents[silero,turn-detector]~=1.6.4
+
+# Redis
+redis==5.2.1
+
+# RAG runtime
+sentence-transformers==3.0.1
+
+# Database
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+pgvector==0.3.6
+
+# Local environment loading
+python-dotenv==1.0.1

@@ -1,0 +1,22 @@
+# ─────────────────────────────────────────────
+# RAG Ingestion — Requirements
+# ─────────────────────────────────────────────
+
+# Config / Validation
+pydantic==2.13.0
+pydantic-settings==2.14.2
+
+# RAG Embeddings
+sentence-transformers==3.0.1
+
+# Excel / Data Ingestion
+pandas==2.2.3
+openpyxl==3.1.5
+
+# Database / pgvector
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+pgvector==0.3.6
+
+# Local environment loading
+python-dotenv==1.0.1

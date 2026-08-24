@@ -1,0 +1,18 @@
+# ─────────────────────────────────────────────
+# Database Migrations — Requirements
+# ─────────────────────────────────────────────
+
+# Alembic
+alembic==1.13.1
+
+# SQLAlchemy / PostgreSQL / pgvector
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+pgvector==0.3.6
+
+# Config / Validation
+pydantic==2.13.0
+pydantic-settings==2.14.2
+
+# Local environment loading
+python-dotenv==1.0.1
