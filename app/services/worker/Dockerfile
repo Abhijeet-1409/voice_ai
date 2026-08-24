@@ -10,31 +10,31 @@ RUN groupadd -r appgroup && useradd -r -g appgroup -u 1000 appuser
 
 WORKDIR /app
 
-# Redirect HuggingFace & SentenceTransformers model cache
+# HuggingFace & SentenceTransformers model cache
 ENV HF_HOME=/app/rag_models
 ENV SENTENCE_TRANSFORMERS_HOME=/app/rag_models
 
-# 1. Copy and install local shared package
+# 1. Install local shared package
 COPY dependencies/ /app/dependencies/
 RUN pip install --no-cache-dir /app/dependencies
 
-# 2. Copy and install worker service requirements
+# 2. Install worker dependencies
 COPY services/worker/requirements.txt /app/worker/requirements.txt
 RUN pip install --no-cache-dir -r /app/worker/requirements.txt
 
-# 3. Copy worker source code into /app/worker/
+# 3. Copy worker source code
 COPY services/worker/ /app/worker/
 
-# Create volume mount target directories
+# Create directories used by mounted volumes
 RUN mkdir -p /app/rag_models /app/data
 
-# 4. Set execution directory, PYTHONPATH, permissions, and drop root privileges
+# 4. Runtime configuration
 WORKDIR /app/worker
 ENV PYTHONPATH=/app/worker
 
+# Drop root privileges
 RUN chown -R appuser:appgroup /app
 USER appuser
 
-ENV AGENT_MODE=start
-
-CMD ["sh", "-c", "python agent_runner.py $AGENT_MODE"]
+# Production container entrypoint
+CMD ["python", "agent_runner.py"]
