@@ -12,8 +12,7 @@ logger = get_logger(_LOGGER)
 
 
 settings = get_worker_settings()
-RATE_CARD_PATH = Path(settings.DATA_DIR) / "rate_card.xlsx"
-
+RATE_CARD_PATH = Path(settings.DATA_DIR)
 
 SHEET_CONFIG = {
     "Compute - Linux"   : {"header": 2, "price_col": "OD/Hr"},
