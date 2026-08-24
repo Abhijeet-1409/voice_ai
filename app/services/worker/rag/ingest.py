@@ -1,3 +1,5 @@
+import asyncio
+
 from shared.infra.vector_store import get_pgvectorstore
 from shared.logging_setup import get_logger
 
@@ -34,3 +36,7 @@ async def run_ingestion() -> None:
     except Exception as e:
         logger.error(f"Ingestion failed — {e}")
         raise
+
+
+if __name__ == "__main__":
+    asyncio.run(run_ingestion())
