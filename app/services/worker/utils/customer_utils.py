@@ -4,7 +4,7 @@ from shared.logging_setup import get_logger
 from shared.config import LifecycleStage
 from shared.infra.crm import get_mockcrmclient, ContactAlreadyExistsError, CRMClientError, ContactNotFoundError
 
-from schemas.session_data import UserData
+from schemas import UserData
 
 
 _LOGGER = "worker.utils.customer_utils"
