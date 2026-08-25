@@ -42,13 +42,6 @@ COPY app/dependencies/shared/alembic.ini \
 
 
 # ─────────────────────────────────────────────
-# Copy root environment file
-# ─────────────────────────────────────────────
-
-COPY .env /app/shared/.env
-
-
-# ─────────────────────────────────────────────
 # Copy shared code required by migrations
 # ─────────────────────────────────────────────
 
