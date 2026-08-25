@@ -9,9 +9,11 @@ from shared.logging_setup import get_logger
 from shared.config import CallType, Channel
 
 from schemas import UserData
-from agent import build_agent, create_agent_session, select_gemini_key
-from agent import on_close, on_error, on_conversation_item_added, on_function_tools_executed
-from utils import lookup_customer, apply_contact_to_userdata
+from .agent_factory import build_agent 
+from .session import create_agent_session
+from .key_selector import select_gemini_key
+from .event_handlers import on_close, on_error, on_conversation_item_added, on_function_tools_executed
+from utils import lookup_customer
 
 
 _LOGGER = "worker.agent.entrypoint"
@@ -32,8 +34,8 @@ async def entrypoint(ctx: JobContext) -> None:
         # extract call metadata
         metadata: dict = json.loads(ctx.room.metadata or "{}")
         stream_sid: str = metadata.get("stream_sid")
-        channel: Channel = metadata.get("channel")
-        call_type: CallType = metadata.get("call_type")
+        channel: Channel = Channel(metadata.get("channel", Channel.PHONE))
+        call_type: CallType = CallType(metadata.get("call_type", CallType.INBOUND))
 
         # set stream_sid in logging context as early as possible, so every
         # subsequent log line in this call (including from key selection)

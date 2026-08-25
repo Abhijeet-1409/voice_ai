@@ -3,7 +3,7 @@ from livekit.agents.llm import FunctionTool
 from shared.logging_setup import get_logger
 from shared.config import CallType, Track, TicketPriority, TicketStatus
 
-from agent import Assistant
+from .assistant import Assistant
 from config import get_worker_settings
 from schemas.session_data import UserData
 from utils import build_user_context_block, describe_all
