@@ -1,6 +1,6 @@
 from redis.exceptions import RedisError
 
-from shared.infra.redis.client import get_redis_client
+from .client import get_redis_client
 from shared.logging_setup import get_logger
 from shared.config import WEB_TOKEN_RATE_LIMIT, WEB_TOKEN_RATE_WINDOW_SECONDS
 

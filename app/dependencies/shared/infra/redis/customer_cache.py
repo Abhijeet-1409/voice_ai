@@ -5,7 +5,7 @@ from redis.exceptions import RedisError
 
 from shared.logging_setup import get_logger
 from shared.config import CUSTOMER_CACHE_TTL
-from shared.infra.redis.client import get_redis_client
+from .client import get_redis_client
 
 
 _LOGGER = "infra.redis.customer_cache"

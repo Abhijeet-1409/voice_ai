@@ -2,7 +2,7 @@ from redis.exceptions import RedisError
 
 from shared.logging_setup import get_logger
 from shared.config import GEMINI_KEY_COOLDOWN_SECONDS
-from shared.infra.redis.client import get_redis_client
+from .client import get_redis_client
 
 
 _LOGGER = "infra.redis.api_key_state"
