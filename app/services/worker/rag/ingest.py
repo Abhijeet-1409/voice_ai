@@ -3,7 +3,8 @@ import asyncio
 from shared.infra.vector_store import get_pgvectorstore
 from shared.logging_setup import get_logger
 
-from rag import get_embedding_model, build_all_texts as _build_all_texts
+from .embedding import get_embedding_model
+from .extraction import build_all_texts as _build_all_texts
 
 
 _LOGGER = "worker.rag.ingest"
