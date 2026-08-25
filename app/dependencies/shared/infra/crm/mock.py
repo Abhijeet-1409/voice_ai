@@ -11,7 +11,7 @@ from shared.logging_setup import get_logger
 from shared.config import TicketPriority, LifecycleStage, TicketStatus, Track, LIFECYCLE_STAGE_ORDER
 from shared.infra.postgres import Contact, Ticket
 from shared.infra.postgres.database import get_async_sessionmaker
-from shared.infra.crm import BaseCRMClient, CRMClientError, ContactNotFoundError, ContactAlreadyExistsError
+from .base import BaseCRMClient, CRMClientError, ContactNotFoundError, ContactAlreadyExistsError
 
 
 _LOGGER = "infra.crm.mock"
