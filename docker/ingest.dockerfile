@@ -33,7 +33,7 @@ ENV SENTENCE_TRANSFORMERS_HOME=/app/rag_models
 
 
 # ─────────────────────────────────────────────
-# Install ingestion-specific dependencies
+# Install ingestion dependencies
 # ─────────────────────────────────────────────
 
 COPY requirements/ingest.txt /tmp/ingest.txt
@@ -42,37 +42,18 @@ RUN pip install --no-cache-dir -r /tmp/ingest.txt
 
 
 # ─────────────────────────────────────────────
-# Copy only shared code required by ingestion
+# Copy shared code
 # ─────────────────────────────────────────────
 
-COPY app/dependencies/shared/__init__.py /app/shared/__init__.py
-COPY app/dependencies/shared/call_context.py /app/shared/call_context.py
-
-COPY app/dependencies/shared/config/ \
-     /app/shared/config/
-
-COPY app/dependencies/shared/logging_setup/ \
-     /app/shared/logging_setup/
-
-COPY app/dependencies/shared/infra/__init__.py \
-     /app/shared/infra/__init__.py
-
-COPY app/dependencies/shared/infra/postgres/ \
-     /app/shared/infra/postgres/
-
-COPY app/dependencies/shared/infra/vector_store/ \
-     /app/shared/infra/vector_store/
+COPY app/dependencies/shared /app/shared/
 
 
 # ─────────────────────────────────────────────
-# Copy worker config + RAG code required by ingestion
+# Copy only worker code required by ingestion
 # ─────────────────────────────────────────────
 
-COPY app/services/worker/config/ \
-     /app/worker/config/
-
-COPY app/services/worker/rag/ \
-     /app/worker/rag/
+COPY app/services/worker/config /app/worker/config
+COPY app/services/worker/rag /app/worker/rag
 
 
 # ─────────────────────────────────────────────
@@ -83,10 +64,10 @@ RUN mkdir -p /app/data /app/rag_models
 
 
 # ─────────────────────────────────────────────
-# Python configuration
+# Python import path
 # ─────────────────────────────────────────────
 
-ENV PYTHONPATH=/app/worker:/app
+ENV PYTHONPATH=/app:/app/worker
 
 WORKDIR /app/worker
 
