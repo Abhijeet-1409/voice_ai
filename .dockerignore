@@ -26,6 +26,7 @@ build/
 .env
 old.env
 sample.env
+new_old.env
 
 # Docs — not needed at runtime
 docs/
