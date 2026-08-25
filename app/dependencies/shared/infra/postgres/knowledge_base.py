@@ -5,7 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from pgvector.sqlalchemy import Vector
 
-from shared.infra.postgres import Base
+from .base import Base
 
 
 class KnowledgeBase(Base):

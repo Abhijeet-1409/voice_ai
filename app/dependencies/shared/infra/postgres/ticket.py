@@ -5,7 +5,7 @@ from sqlalchemy import DateTime, ForeignKey, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.config import TicketPriority, TicketStatus
-from shared.infra.postgres import Base
+from .base import Base
 
 
 class Ticket(Base):

@@ -6,7 +6,7 @@ from sqlalchemy import Boolean, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from shared.config import LifecycleStage, Track
-from shared.infra.postgres import Base
+from .base import Base
 
 
 class Contact(Base):

@@ -8,8 +8,8 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from shared.logging_setup import get_logger
 from shared.config import Channel, CallType
-from shared.infra.postgres import Base
-from shared.infra.postgres.database import get_async_sessionmaker
+from .base import Base
+from .database import get_async_sessionmaker
 
 
 _LOGGER = "infra.postgres.call_log"
