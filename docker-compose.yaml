@@ -1,20 +1,20 @@
-version: "3.8"
-
 services:
 
-  # ── Infrastructure: Postgres with pgvector ─────────────
+  # ─────────────────────────────────────────────
+  # PostgreSQL + pgvector
+  # ─────────────────────────────────────────────
   postgres:
     image: pgvector/pgvector:pg16
     container_name: voice_ai_postgres
     restart: unless-stopped
 
-    ports:
-      - "5432:5432"
-
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-voice_ai}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+
+    ports:
+      - "5432:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -23,18 +23,28 @@ services:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-postgres}"
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-voice_ai}"
         ]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 5s
 
 
-  # ── Infrastructure: Redis Cache & Session Store ────────
+  # ─────────────────────────────────────────────
+  # Redis
+  # ─────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     container_name: voice_ai_redis
     restart: unless-stopped
+
+    command:
+      [
+        "redis-server",
+        "--requirepass",
+        "${REDIS_PASSWORD:-redis_password}"
+      ]
 
     ports:
       - "6379:6379"
@@ -47,18 +57,23 @@ services:
         [
           "CMD",
           "redis-cli",
+          "-a",
+          "${REDIS_PASSWORD:-redis_password}",
           "ping"
         ]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 5s
 
 
-  # ── Database Migrations ────────────────────────────────
+  # ─────────────────────────────────────────────
+  # Database migrations
+  # ─────────────────────────────────────────────
   migrations:
     build:
-      context: ./app
-      dockerfile: services/worker/Dockerfile
+      context: .
+      dockerfile: docker/migrations.Dockerfile
 
     container_name: voice_ai_migrations
     restart: "no"
@@ -66,49 +81,30 @@ services:
     env_file:
       - .env
 
-    working_dir: /app/dependencies/shared
-
     depends_on:
       postgres:
         condition: service_healthy
 
-    command: alembic upgrade head
+    command:
+      [
+        "alembic",
+        "upgrade",
+        "head"
+      ]
 
 
-  # ── LiveKit Agent Worker ───────────────────────────────
-  worker:
-    build:
-      context: ./app
-      dockerfile: services/worker/Dockerfile
-
-    container_name: voice_ai_worker
-    restart: unless-stopped
-
-    env_file:
-      - .env
-
-    volumes:
-      - ./rag_models:/app/rag_models
-      - ./data:/app/data
-
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-      redis:
-        condition: service_healthy
-
-      migrations:
-        condition: service_completed_successfully
-
-
-  # ── One-Off Tool: Knowledge Base Ingestion ─────────────
+  # ─────────────────────────────────────────────
+  # RAG ingestion
+  # Run with:
+  # docker compose --profile tools up --build ingest
+  # ─────────────────────────────────────────────
   ingest:
     build:
-      context: ./app
-      dockerfile: services/worker/Dockerfile
+      context: .
+      dockerfile: docker/ingest.Dockerfile
 
     container_name: voice_ai_ingest
+    restart: "no"
 
     profiles:
       - tools
@@ -127,7 +123,47 @@ services:
       migrations:
         condition: service_completed_successfully
 
-    command: python -m rag.ingest
+    command:
+      [
+        "python",
+        "-m",
+        "rag.ingest"
+      ]
+
+
+  # ─────────────────────────────────────────────
+  # LiveKit Agent Worker
+  # ─────────────────────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+
+    container_name: voice_ai_worker
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    volumes:
+      - ./data:/app/data
+      - ./rag_models:/app/rag_models
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
+
+      migrations:
+        condition: service_completed_successfully
+
+    command:
+      [
+        "python",
+        "agent_runner.py"
+      ]
 
 
 volumes:
