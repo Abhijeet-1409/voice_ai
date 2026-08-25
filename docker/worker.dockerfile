@@ -51,7 +51,7 @@ RUN pip install --no-cache-dir -r /tmp/worker.txt
 
 
 # ─────────────────────────────────────────────
-# Copy worker application
+# Copy complete worker application
 # ─────────────────────────────────────────────
 
 COPY app/services/worker/ /app/worker/
@@ -61,7 +61,7 @@ COPY app/services/worker/ /app/worker/
 # Runtime directories
 # ─────────────────────────────────────────────
 
-RUN mkdir -p /app/rag_models /app/data
+RUN mkdir -p /app/data /app/rag_models
 
 
 # ─────────────────────────────────────────────
