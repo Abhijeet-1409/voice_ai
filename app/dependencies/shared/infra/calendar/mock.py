@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from shared.logging_setup import get_logger
 from shared.config import Track
-from shared.infra.calendar.base import BaseCalendarClient
+from .base import BaseCalendarClient
 
 
 _LOGGER = "infra.calendar.mock"
