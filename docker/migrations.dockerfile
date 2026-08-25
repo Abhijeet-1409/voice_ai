@@ -21,11 +21,11 @@ RUN groupadd -r appgroup \
 # Application root
 # ─────────────────────────────────────────────
 
-WORKDIR /app/shared
+WORKDIR /app
 
 
 # ─────────────────────────────────────────────
-# Install migration-specific dependencies
+# Install migration dependencies
 # ─────────────────────────────────────────────
 
 COPY requirements/migrations.txt /tmp/migrations.txt
@@ -34,47 +34,17 @@ RUN pip install --no-cache-dir -r /tmp/migrations.txt
 
 
 # ─────────────────────────────────────────────
-# Alembic configuration
+# Copy shared code
 # ─────────────────────────────────────────────
 
-COPY app/dependencies/shared/alembic.ini \
-     /app/shared/alembic.ini
-
-
-# ─────────────────────────────────────────────
-# Copy shared code required by migrations
-# ─────────────────────────────────────────────
-
-COPY app/dependencies/shared/__init__.py \
-     /app/shared/__init__.py
-
-COPY app/dependencies/shared/call_context.py \
-     /app/shared/call_context.py
-
-COPY app/dependencies/shared/config/ \
-     /app/shared/config/
-
-COPY app/dependencies/shared/logging_setup/ \
-     /app/shared/logging_setup/
+COPY app/dependencies/shared /app/shared/
 
 
 # ─────────────────────────────────────────────
-# PostgreSQL models / database infrastructure
+# Copy Alembic project
 # ─────────────────────────────────────────────
 
-COPY app/dependencies/shared/infra/__init__.py \
-     /app/shared/infra/__init__.py
-
-COPY app/dependencies/shared/infra/postgres/ \
-     /app/shared/infra/postgres/
-
-
-# ─────────────────────────────────────────────
-# Alembic migration files
-# ─────────────────────────────────────────────
-
-COPY app/dependencies/shared/infra/migrations/ \
-     /app/shared/infra/migrations/
+COPY app/migrations /app/migrations
 
 
 # ─────────────────────────────────────────────
@@ -97,7 +67,7 @@ USER appuser
 # Migration working directory
 # ─────────────────────────────────────────────
 
-WORKDIR /app/shared
+WORKDIR /app/migrations
 
 
 # ─────────────────────────────────────────────
