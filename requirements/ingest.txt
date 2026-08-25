@@ -2,6 +2,13 @@
 # RAG Ingestion — Requirements
 # ─────────────────────────────────────────────
 
+# Force CPU-only torch build — the default PyPI wheel pulls in CUDA
+# toolkit + cuDNN (~900MB combined) that this container never uses,
+# since it has no GPU access. This index serves a much smaller
+# CPU-only wheel instead.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+
 # Config / Validation
 pydantic==2.13.0
 pydantic-settings==2.14.2

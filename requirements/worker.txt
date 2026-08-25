@@ -2,6 +2,13 @@
 # Worker Service — Runtime Requirements
 # ─────────────────────────────────────────────
 
+# Force CPU-only torch build — the default PyPI wheel pulls in CUDA
+# toolkit + cuDNN (~900MB combined) that this container never uses,
+# since it has no GPU access. This index serves a much smaller
+# CPU-only wheel instead.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+
 # Config / Validation
 pydantic==2.13.0
 pydantic-settings==2.14.2
@@ -19,6 +26,10 @@ redis==5.2.1
 
 # RAG runtime
 sentence-transformers==3.0.1
+
+# Excel — extraction.py (imported via rag/__init__.py) reads rate_card.xlsx
+pandas==2.2.3
+openpyxl==3.1.5
 
 # Database
 sqlalchemy==2.0.36
