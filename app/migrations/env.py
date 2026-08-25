@@ -9,9 +9,11 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 
-# 1. Add the project root to the system path so Alembic can find the 'shared' module.
-# Assuming this file is at shared/infra/migrations/env.py
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
+# 1. Add the 'dependencies' folder to the system path so Alembic can
+# find the 'shared' package. env.py lives at app/migrations/env.py;
+# shared lives at app/dependencies/shared/ — one level up from
+# migrations/, then into dependencies/.
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../dependencies')))
 
 # 2. Import your settings and models.
 from shared.config import get_app_settings
