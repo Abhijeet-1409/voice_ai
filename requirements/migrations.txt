@@ -14,5 +14,10 @@ pgvector==0.3.6
 pydantic==2.13.0
 pydantic-settings==2.14.2
 
+# Redis
+# Required temporarily because shared/infra/__init__.py
+# eagerly imports shared.infra.redis.
+redis==5.2.1
+
 # Local environment loading
 python-dotenv==1.0.1
