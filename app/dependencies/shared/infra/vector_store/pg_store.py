@@ -4,7 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from shared.logging_setup import get_logger
-from shared.infra.vector_store import BaseVectorStore, VectorStoreError
+from .base import BaseVectorStore, VectorStoreError
 from shared.infra.postgres.database import get_async_sessionmaker
 
 
