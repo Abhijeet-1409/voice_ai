@@ -63,6 +63,7 @@ class UserData(BaseModel):
     # --- Identity ---
     clerk_id: Optional[str] = None       # web channel only, not yet in scope
     phone: Optional[str] = None          # always set for phone channel from SIP metadata
+    user_id: Optional[str] = None
 
     # --- CRM-mirrored fields (mirrors shared.infra.postgres.contact.Contact) ---
     # None/False/LEAD if no matching contact was found — customer_id
