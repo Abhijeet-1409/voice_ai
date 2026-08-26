@@ -19,7 +19,7 @@ class WorkerSettings(AppBaseSettings):
     GEMINI_API_KEY_1: str
     GEMINI_API_KEY_2: str
     GEMINI_API_KEY_3: str
-    GEMINI_MODEL: str = "gemini-2.5-flash-lite"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_TEMPERATURE: float = 0.4
     GEMINI_VOICE: str = "Aoede"
     GEMINI_TOKEN_LIMIT: int = 80
