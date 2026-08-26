@@ -10,10 +10,9 @@ from shared.config import get_app_settings, AppBaseSettings
 _LOGGER = "infra.redis.client"
 
 
-@cache
 def get_redis_client() -> redis.Redis:
     """
-    Create and cache a singleton Redis asynchronous client.
+    Creates and configures a Redis asynchronous client.
 
     The client is configured from the application settings with production-ready
     defaults, including connection pooling, automatic string decoding, and

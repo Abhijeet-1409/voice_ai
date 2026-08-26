@@ -13,10 +13,9 @@ from shared.config import get_app_settings, AppBaseSettings
 _LOGGER = "infra.postgres.database"
 
 
-@cache
 def get_async_engine() -> AsyncEngine:
     """
-    Create and cache a singleton SQLAlchemy asynchronous engine.
+    Creates and configures a SQLAlchemy asynchronous engine.
 
     The engine configuration is retrieved from the application settings,
     configured with pgvector support for vector embeddings,
@@ -25,7 +24,6 @@ def get_async_engine() -> AsyncEngine:
     Returns:
         AsyncEngine: The configured asynchronous database engine instance.
     """
-
     settings: AppBaseSettings = get_app_settings()
 
     engine: AsyncEngine = create_async_engine(
@@ -38,7 +36,6 @@ def get_async_engine() -> AsyncEngine:
 
     # Listen for every new database connection created by the pool
     @event.listens_for(engine.sync_engine, "connect")
-    @event.listens_for(engine.sync_engine, "connect")
     def register_custom_types(dbapi_connection, connection_record):
         # Instruct the asyncpg driver to load the pgvector codec
         dbapi_connection.run_async(lambda conn: register_vector(conn))
@@ -46,19 +43,17 @@ def get_async_engine() -> AsyncEngine:
     return engine
 
 
-@cache
 def get_async_sessionmaker() -> async_sessionmaker[AsyncSession]:
     """
-    Create and cache a singleton SQLAlchemy asynchronous session factory.
+    Creates a SQLAlchemy asynchronous session factory.
 
-    Configures a sessionmaker bound to the cached async engine, ensuring that
+    Configures a sessionmaker bound to the async engine, ensuring that
     `expire_on_commit` is disabled to prevent accidental lazy-loading errors
     after a transaction commits.
 
     Returns:
         async_sessionmaker[AsyncSession]: A factory for generating new AsyncSession instances.
     """
-
     engine: AsyncEngine = get_async_engine()
 
     async_session: async_sessionmaker[AsyncSession] = async_sessionmaker(
