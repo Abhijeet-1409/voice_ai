@@ -73,7 +73,7 @@ class UserData(BaseModel):
     track: Optional[Track] = None
     qualified: bool = False
     lifecyclestage: LifecycleStage = LifecycleStage.LEAD
-
+    call_sid: Optional[str] = None
     # --- Call-specific qualification context (NOT on Contact — see
     # domain/tools/sales_qualification.py's qualify_lead docstring.
     # Written to call_log at call end, not the contact record, since
