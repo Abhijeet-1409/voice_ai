@@ -22,8 +22,10 @@ class Assistant(Agent):
     access.
     """
 
-    def __init__(self, instructions: str, tools: list[FunctionTool]) -> None:
+    def __init__(self, instructions: str, tools: list[FunctionTool], enum_refernce: str, name: str) -> None:
         logger.info("Initializing Assistant agent")
+        self.name = name
+        self.enum_refernce = enum_refernce
         super().__init__(
             instructions=instructions,
             tools=tools,
