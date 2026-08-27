@@ -79,7 +79,12 @@ def build_agent(user_data: UserData) -> Assistant:
         agent_name=settings.AGENT_NAME,
     )
 
-    assistant = Assistant(instructions=instructions, tools=tool_list)
+    assistant = Assistant(
+        instructions=instructions, 
+        tools=tool_list, 
+        enum_refernce=enum_reference, 
+        name=settings.AGENT_NAME
+    )
 
     logger.debug(
         f"Built Assistant for call_type='{call_type}' with {len(tool_list)} "
