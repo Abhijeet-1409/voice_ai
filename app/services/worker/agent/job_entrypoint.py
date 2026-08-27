@@ -33,7 +33,7 @@ async def entrypoint(ctx: JobContext) -> None:
 
         # extract call metadata
         metadata: dict = json.loads(ctx.room.metadata or "{}")
-        stream_sid: str = metadata.get("stream_sid")
+        stream_sid: str = ctx.room.name
         channel: Channel = Channel(metadata.get("channel", Channel.PHONE))
         call_type: CallType = CallType(metadata.get("call_type", CallType.INBOUND))
 
@@ -41,7 +41,7 @@ async def entrypoint(ctx: JobContext) -> None:
         # subsequent log line in this call (including from key selection)
         # carries the right stream_sid
         stream_sid_var.set(stream_sid)
-
+        logger.debug(f"Room metadata: {metadata}")
         # select a gemini key — sync, no await
         gemini_key = select_gemini_key()
 
