@@ -24,6 +24,7 @@ class WorkerSettings(AppBaseSettings):
     GEMINI_VOICE: str = "Aoede"
     GEMINI_TOKEN_LIMIT: int = 80
     GEMINI_ACTIVE_KEY_INDEX: int = 1
+    GEMINI_THINKING_BUDGET: int = 0
 
     # ── Cartesia ───────────────────────────────────────────────────────────────
     CARTESIA_API_KEY: str
