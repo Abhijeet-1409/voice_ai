@@ -1,3 +1,5 @@
+import asyncio
+import json
 import logging
 
 from livekit.agents import AgentServer, JobProcess, JobContext, cli
@@ -31,7 +33,7 @@ server = AgentServer(
 )
 
 
-async def prewarm(proc: JobProcess):
+async def _prewarm_async(proc: JobProcess):
     """
     Initializes global resources before the worker begins accepting jobs.
 
@@ -66,10 +68,15 @@ async def prewarm(proc: JobProcess):
         raise
 
 
+def prewarm(proc: JobProcess):
+    """Sync entrypoint required by setup_fnc — runs the async logic to completion."""
+    asyncio.run(_prewarm_async(proc))
+
+
 server.setup_fnc = prewarm
 
 
-@server.rtc_session()
+@server.rtc_session(agent_name=settings.AGENT_NAME)
 async def entrypoint(ctx: JobContext):
     """
     The main WebRTC session entrypoint for all incoming LiveKit jobs.
