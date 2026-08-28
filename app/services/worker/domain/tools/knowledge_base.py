@@ -16,19 +16,22 @@ logger = get_logger(_LOGGER)
 @function_tool
 async def search_knowledge_base(ctx: RunContext, query: str) -> str:
     """
-    Searches the vector knowledge base for information regarding Intelics services, 
-    AWS partner programs, and internal cloud offerings.
+    Searches the vector knowledge base for information regarding Intelics 
+    services, AWS partner programs, pricing, and internal cloud offerings.
 
-    This tool MUST be called to retrieve verified context before answering factual 
-    questions to avoid hallucination.
+    Call this tool for specific factual questions about pricing, technical 
+    details, or service specifics. For general questions about what tracks 
+    or services Intelics offers, answer directly from your instructions 
+    without calling this tool.
 
     Args:
         ctx (RunContext): The LiveKit agent execution context.
         query (str): The search query or specific topic to look up.
 
     Returns:
-        str: A combined string of relevant text passages retrieved from the vector store, 
-            or a generic string indicating that no information was found.
+        str: A combined string of relevant text passages retrieved from 
+            the vector store, or a generic string indicating that no 
+            information was found.
 
     Raises:
         ToolError: If the vector store is unreachable or if an unexpected exception occurs 
