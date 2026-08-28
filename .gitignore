@@ -59,3 +59,4 @@ data/
 .alembic/
 base_requirements.txt
 old_worker_requirements.txt
+turn_detector_models
