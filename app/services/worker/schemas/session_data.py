@@ -89,6 +89,12 @@ class UserData(BaseModel):
     # --- Tool call log (accumulated in-memory, bulk-written on call end) ---
     tool_call_log: list[ToolCallRecord] = Field(default_factory=list)
 
+    # --- Determines whether the session uses a realtime (speech-to-speech)
+    # model instead of a cascaded STT/LLM/TTS pipeline. Defaults to False —
+    # cascaded pipeline is the current standard path; realtime is not yet
+    # compatible with the Task-based email/meeting confirmation flow. ---
+    is_realtime_model: bool = False
+    
     # --- Lifecycle ---
     end_reason: Optional[CloseReason] = None
     error_detail: Optional[str] = None
