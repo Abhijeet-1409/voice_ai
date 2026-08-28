@@ -26,9 +26,11 @@ WORKDIR /app
 
 # ─────────────────────────────────────────────
 # HuggingFace / SentenceTransformer cache
+# HF_HOME — LiveKit plugin models (e.g. turn detector), separate folder
+# SENTENCE_TRANSFORMERS_HOME — embedding model for RAG, separate folder
 # ─────────────────────────────────────────────
 
-ENV HF_HOME=/app/rag_models
+ENV HF_HOME=/app/turn_detector_models
 ENV SENTENCE_TRANSFORMERS_HOME=/app/rag_models
 
 
@@ -61,7 +63,7 @@ COPY app/services/worker/ /app/worker/
 # Runtime directories
 # ─────────────────────────────────────────────
 
-RUN mkdir -p /app/data /app/rag_models
+RUN mkdir -p /app/data /app/rag_models /app/turn_detector_models
 
 
 # ─────────────────────────────────────────────
