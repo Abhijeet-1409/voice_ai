@@ -2,6 +2,7 @@ services:
 
   # ─────────────────────────────────────────────
   # PostgreSQL + pgvector
+  # Long-running infrastructure service
   # ─────────────────────────────────────────────
   postgres:
     image: pgvector/pgvector:pg16
@@ -33,6 +34,7 @@ services:
 
   # ─────────────────────────────────────────────
   # Redis
+  # Long-running infrastructure service
   # ─────────────────────────────────────────────
   redis:
     image: redis:7-alpine
@@ -68,9 +70,15 @@ services:
 
 
   # ─────────────────────────────────────────────
-  # Database migrations
+  # Database migration job
+  # One-shot operation
+  #
+  # Run explicitly:
+  # docker compose run --rm migrations
   # ─────────────────────────────────────────────
   migrations:
+    image: voice_ai_migrations:latest
+
     build:
       context: .
       dockerfile: docker/migrations.Dockerfile
@@ -86,19 +94,19 @@ services:
         condition: service_healthy
 
     command:
-      [
-        "alembic",
-        "upgrade",
-        "head"
-      ]
+      ["alembic", "upgrade", "head"]
 
 
   # ─────────────────────────────────────────────
-  # RAG ingestion
-  # Run with:
-  # docker compose --profile tools up --build ingest
+  # RAG ingestion job
+  # One-shot bootstrap operation
+  #
+  # Run explicitly:
+  # docker compose --profile bootstrap run --rm ingest
   # ─────────────────────────────────────────────
   ingest:
+    image: voice_ai_ingest:latest
+
     build:
       context: .
       dockerfile: docker/ingest.Dockerfile
@@ -107,7 +115,7 @@ services:
     restart: "no"
 
     profiles:
-      - tools
+      - bootstrap
 
     env_file:
       - .env
@@ -120,27 +128,26 @@ services:
       postgres:
         condition: service_healthy
 
-      migrations:
-        condition: service_completed_successfully
-
     command:
-      [
-        "python",
-        "-m",
-        "rag.ingest"
-      ]
+      ["python", "-m", "rag.ingest"]
 
 
   # ─────────────────────────────────────────────
   # LiveKit Agent Worker
+  # Long-running application service
   # ─────────────────────────────────────────────
   worker:
+    image: voice_ai_worker:latest
+
     build:
       context: .
       dockerfile: docker/worker.Dockerfile
 
     container_name: voice_ai_worker
     restart: unless-stopped
+
+    environment:
+      - AGENT_MODE=${AGENT_MODE:-dev}
 
     env_file:
       - .env
@@ -156,14 +163,7 @@ services:
       redis:
         condition: service_healthy
 
-      migrations:
-        condition: service_completed_successfully
-
-    command:
-      [
-        "python",
-        "agent_runner.py"
-      ]
+    command: ["sh", "-c", "python -m livekit.agents download-files && python agent_runner.py $AGENT_MODE"]
 
 
 volumes:
