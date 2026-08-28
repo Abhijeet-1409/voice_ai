@@ -97,7 +97,7 @@ def on_function_tools_executed(
             arguments=call.arguments if isinstance(call.arguments, dict) else {},
             result=output.output,
             is_error=output.is_error,
-            error_message=output.error_message if output.is_error else None,
+            error_message=output.output if output.is_error else None,
         )
         userdata.tool_call_log.append(record)
         logger.debug(
