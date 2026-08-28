@@ -16,13 +16,15 @@ logger = get_logger(_LOGGER)
 @function_tool
 async def search_knowledge_base(ctx: RunContext, query: str) -> str:
     """
-    Searches the vector knowledge base for information regarding Intelics 
-    services, AWS partner programs, pricing, and internal cloud offerings.
+    Searches the vector knowledge base for verified information about 
+    Intelics. Currently contains pricing and infrastructure details —
+    more documents will be added over time.
 
-    Call this tool for specific factual questions about pricing, technical 
-    details, or service specifics. For general questions about what tracks 
-    or services Intelics offers, answer directly from your instructions 
-    without calling this tool.
+    Call this tool for any specific factual question about Intelics 
+    that is not covered by your instructions directly. Do NOT call 
+    this tool for general questions about the three AWS partner tracks
+    (Billing Transfer, Green Field Migration, VMware Workload Migration)
+    — answer those directly from your instructions.
 
     Args:
         ctx (RunContext): The LiveKit agent execution context.
