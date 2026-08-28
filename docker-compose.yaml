@@ -155,6 +155,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./rag_models:/app/rag_models
+      - ./turn_detector_models:/app/turn_detector_models
 
     depends_on:
       postgres:
