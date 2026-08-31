@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../d
 
 # 2. Import your settings and models.
 from shared.config import get_app_settings
-from shared.infra.postgres import Base, CallLog, Transcript, ToolLog, KnowledgeBase, User, Contact, Ticket
+from shared.infra.postgres import Base, CallLog, Transcript, ToolLog, KnowledgeChunk, User, Contact, Ticket
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
