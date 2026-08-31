@@ -1,12 +1,13 @@
-import uuid
 from functools import cache
 
-from sqlalchemy import text
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from shared.logging_setup import get_logger
-from .base import BaseVectorStore, VectorStoreError
+from shared.infra.postgres import KnowledgeChunk
 from shared.infra.postgres.database import get_async_sessionmaker
+
+from .base import BaseVectorStore, VectorStoreError
 
 
 _LOGGER = "infra.vector_store.pg_store"
@@ -45,22 +46,16 @@ class PgVectorStore(BaseVectorStore):
         """
         try:
             async with self.async_session() as session:
-                result = await session.execute(
-                    text("""
-                        SELECT content
-                        FROM knowledge_base
-                        ORDER BY embedding <-> :vector
-                        LIMIT :top_k
-                    """),
-                    {
-                        "vector": query_vector,
-                        "top_k": top_k,
-                    },
+                stmt = (
+                    select(KnowledgeChunk.content)
+                    .order_by(KnowledgeChunk.embedding.l2_distance(query_vector))
+                    .limit(top_k)
                 )
+                result = await session.execute(stmt)
 
-                rows = result.fetchall()
+                rows = result.scalars().all()
                 self.logger.debug(f"Vector search returned {len(rows)} results")
-                return [row[0] for row in rows]
+                return list(rows)
 
         except SQLAlchemyError as sql_err:
             self.logger.error(f"Vector search failed: {sql_err}")
@@ -76,7 +71,7 @@ class PgVectorStore(BaseVectorStore):
         Inserts new text chunks and their corresponding embeddings into the knowledge base.
 
         Args:
-            items (list[tuple[str, list[float]]]): A list of tuples, where each tuple 
+            items (list[tuple[str, list[float]]]): A list of tuples, where each tuple
                 contains the text content and its vector embedding.
 
         Raises:
@@ -88,27 +83,13 @@ class PgVectorStore(BaseVectorStore):
 
         try:
             async with self.async_session() as session:
-                values = [
-                    {
-                        "id": str(uuid.uuid4()),
-                        "content": content,
-                        "vector": vector,
-                    }
+                rows = [
+                    KnowledgeChunk(content=content, embedding=vector)
                     for content, vector in items
                 ]
-
-                await session.execute(
-                    text("""
-                        INSERT INTO knowledge_base
-                            (id, content, embedding)
-                        VALUES
-                            (:id, :content, :vector)
-                    """),
-                    values,
-                )
-
+                session.add_all(rows)
                 await session.commit()
-                self.logger.debug(f"Inserted {len(items)} chunk(s) into knowledge base")
+                self.logger.debug(f"Inserted {len(rows)} chunk(s) into knowledge base")
 
         except SQLAlchemyError as sql_err:
             self.logger.error(f"Failed to insert {len(items)} chunk(s): {sql_err}")
@@ -118,12 +99,11 @@ class PgVectorStore(BaseVectorStore):
             ) from sql_err
 
 
-@cache
 def get_pgvectorstore() -> PgVectorStore:
     """
-    Create and cache a thread-safe singleton instance of PgVectorStore.
+    Creates a new instance of PgVectorStore.
 
     Returns:
-        PgVectorStore: The cached vector storage manager instance.
+        PgVectorStore: The vector storage manager instance.
     """
     return PgVectorStore()
