@@ -262,12 +262,11 @@ class MockCRMClient(BaseCRMClient):
             raise CRMClientError(f"Database error retrieving tickets for contact {contact_id}") from sql_err
 
 
-@cache
 def get_mockcrmclient() -> MockCRMClient:
     """
-    Create and cache a thread-safe singleton instance of the MockCRMClient.
+    Creates a new instance of the MockCRMClient.
 
     Returns:
-        MockCRMClient: The cached mock CRM client instance.
+        MockCRMClient: The mock CRM client instance.
     """
     return MockCRMClient()

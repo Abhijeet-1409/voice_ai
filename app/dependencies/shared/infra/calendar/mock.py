@@ -62,12 +62,11 @@ class MockCalendarClient(BaseCalendarClient):
         return True
 
 
-@cache
 def get_mockcalendarclient() -> MockCalendarClient:
     """
-    Create and cache a thread-safe singleton instance of the MockCalendarClient.
+    Creates a new instance of the MockCalendarClient.
 
     Returns:
-        MockCalendarClient: The cached mock calendar client instance.
+        MockCalendarClient: The mock calendar client instance.
     """
     return MockCalendarClient()
