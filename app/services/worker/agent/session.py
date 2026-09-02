@@ -53,8 +53,10 @@ def create_agent_session(api_key: str, user_data: UserData) -> AgentSession[User
             model=settings.GEMINI_MODEL,
             temperature=settings.GEMINI_TEMPERATURE,
             max_output_tokens=settings.GEMINI_TOKEN_LIMIT,
-            api_key=api_key,
-            thinking_config={"thinking_budget": settings.GEMINI_THINKING_BUDGET}
+            thinking_config={"thinking_budget": settings.GEMINI_THINKING_BUDGET},
+            vertexai=settings.VERTEXAI,
+            project=settings.PROJECT,
+            location=settings.LOCATION,
         ),
         tts=cartesia.TTS(
             api_key=settings.CARTESIA_API_KEY,
