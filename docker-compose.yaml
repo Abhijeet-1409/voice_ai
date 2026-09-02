@@ -148,6 +148,7 @@ services:
 
     environment:
       - AGENT_MODE=${AGENT_MODE:-dev}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/application-default-credentials.json
 
     env_file:
       - .env
@@ -156,6 +157,7 @@ services:
       - ./data:/app/data
       - ./rag_models:/app/rag_models
       - ./turn_detector_models:/app/turn_detector_models
+      - ${APPDATA}/gcloud/application_default_credentials.json:/app/credentials/application_default_credentials.json:ro
 
     depends_on:
       postgres:
