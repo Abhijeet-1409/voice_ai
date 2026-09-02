@@ -63,7 +63,7 @@ COPY app/services/worker/ /app/worker/
 # Runtime directories
 # ─────────────────────────────────────────────
 
-RUN mkdir -p /app/data /app/rag_models /app/turn_detector_models
+RUN mkdir -p /app/data /app/rag_models /app/turn_detector_models /app/credentials
 
 
 # ─────────────────────────────────────────────
