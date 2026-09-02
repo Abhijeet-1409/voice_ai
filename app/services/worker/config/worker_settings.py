@@ -25,6 +25,9 @@ class WorkerSettings(AppBaseSettings):
     GEMINI_TOKEN_LIMIT: int = 80
     GEMINI_ACTIVE_KEY_INDEX: int = 1
     GEMINI_THINKING_BUDGET: int = 0
+    PROJECT: str | None
+    LOCATION: str | None
+    VERTEXAI: bool | None = False
 
     # ── Cartesia ───────────────────────────────────────────────────────────────
     CARTESIA_API_KEY: str
