@@ -15,7 +15,7 @@ async def main() -> None:
     api_secret = os.environ["LIVEKIT_API_SECRET"]
     agent_name = os.environ["AGENT_NAME"]
     phone_no = os.environ["PHONE_NO"]
-    room_timeout= os.environ["LIVEKIT_ROOM_TIMEOUT"]
+    room_timeout= int(os.environ["LIVEKIT_ROOM_TIMEOUT"])
 
     room_name = f"{ROOM_PREFIX}-{uuid.uuid4().hex[:8]}"
 
