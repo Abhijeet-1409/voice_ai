@@ -148,7 +148,7 @@ services:
 
     environment:
       - AGENT_MODE=${AGENT_MODE:-dev}
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/application-default-credentials.json
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/application_default_credentials.json
 
     env_file:
       - .env
