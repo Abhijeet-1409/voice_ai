@@ -8,6 +8,8 @@ from livekit.agents.llm import RealtimeModel
 from shared.call_context import stream_sid_var
 from shared.logging_setup import get_logger
 from shared.config import CallType, Channel
+from shared.infra.postgres import db_init
+from shared.infra.redis import ping_redis
 
 from schemas import UserData
 from .agent_factory import build_agent 
@@ -23,11 +25,29 @@ logger = get_logger(_LOGGER)
 
 async def entrypoint(ctx: JobContext) -> None:
     """
-    Per-call entrypoint, registered via @server.rtc_session(). Connects to
-    the room, resolves call metadata, builds the AgentSession + Assistant
-    for this call, registers event handlers, and starts the session.
+    Primary execution entrypoint for a LiveKit agent job (per-call).
+
+    This function is triggered every time a new call routes to this worker. 
+    It is responsible for bootstrapping the call lifecycle, which includes:
+    1. Initializing network-bound singletons (Database, Redis) post-fork.
+    2. Extracting call metadata and looking up the caller's profile.
+    3. Constructing the unified UserData context object.
+    4. Building the AgentSession and configuring the assistant.
+    5. Registering event handlers for call lifecycle events.
+    6. Starting the active voice session with noise cancellation.
+
+    Args:
+        ctx (JobContext): The context for the current LiveKit job, providing 
+                          access to the room, connections, and metadata.
+                          
+    Raises:
+        Exception: If call bootstrapping fails, the error is logged and re-raised 
+                   to let the framework cleanly terminate the job.
     """
     try:
+        await db_init()  # ensure the database engine is initialized before any DB operations
+        await ping_redis()  # ensure Redis is reachable
+
         # connect to the room first — metadata isn't reliably readable
         # until the room connection is established
         await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
@@ -43,7 +63,8 @@ async def entrypoint(ctx: JobContext) -> None:
         # carries the right stream_sid
         stream_sid_var.set(stream_sid)
         logger.debug(f"Room metadata: {metadata}")
-        # select a gemini key — sync, no await
+        
+        # select a key — sync, no await
         gemini_key = select_gemini_key()
 
         # look up the caller by phone — pure lookup, never creates
