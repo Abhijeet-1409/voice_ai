@@ -1,5 +1,3 @@
-from functools import cache
-
 from sqlalchemy import event, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine, AsyncSession, async_sessionmaker
@@ -13,6 +11,16 @@ from shared.config import get_app_settings, AppBaseSettings
 _LOGGER = "infra.postgres.database"
 
 
+# Private singleton instance of the asynchronous database engine. 
+# Lazy-loaded to ensure it is only created when first needed, preventing 
+# connection pool corruption when processes fork (e.g., during worker pre-warming).
+_engine: AsyncEngine | None = None
+
+# Private singleton instance of the database session factory.
+# Bound to the _engine above and used to generate new sessions for transactions.
+_sessionmaker: async_sessionmaker[AsyncSession] | None = None
+
+
 def get_async_engine() -> AsyncEngine:
     """
     Creates and configures a SQLAlchemy asynchronous engine.
@@ -24,7 +32,11 @@ def get_async_engine() -> AsyncEngine:
     Returns:
         AsyncEngine: The configured asynchronous database engine instance.
     """
+    global _engine
     settings: AppBaseSettings = get_app_settings()
+
+    if _engine:
+        return _engine
 
     engine: AsyncEngine = create_async_engine(
         settings.DATABASE_URL,
@@ -33,6 +45,8 @@ def get_async_engine() -> AsyncEngine:
         max_overflow=10,      # Number of extra connections to allow during traffic spikes
         pool_pre_ping=True    # Highly recommended: checks if a connection is alive before using it
     )
+
+    _engine = engine
 
     # Listen for every new database connection created by the pool
     @event.listens_for(engine.sync_engine, "connect")
@@ -54,15 +68,25 @@ def get_async_sessionmaker() -> async_sessionmaker[AsyncSession]:
     Returns:
         async_sessionmaker[AsyncSession]: A factory for generating new AsyncSession instances.
     """
+    global _sessionmaker
+
     engine: AsyncEngine = get_async_engine()
 
-    async_session: async_sessionmaker[AsyncSession] = async_sessionmaker(
+    if engine is None:
+        raise RuntimeError("Initialize database engine.....")
+
+    if _sessionmaker:
+        return _sessionmaker
+    
+    sessionmaker: async_sessionmaker[AsyncSession] = async_sessionmaker(
         engine,
         class_=AsyncSession,
         expire_on_commit=False
     )
 
-    return async_session
+    _sessionmaker = sessionmaker
+
+    return sessionmaker
 
 
 async def db_init():
@@ -96,12 +120,18 @@ async def db_close():
     This ensures all connections are gracefully closed and returned to the server,
     preventing connection leaks and noisy database error logs.
     """
+    global _engine, _sessionmaker
 
-    engine: AsyncEngine = get_async_engine()
+    # Check the private variable directly instead of calling get_async_engine()
+    if _engine is None:
+        raise RuntimeError("Initialize database first before closing...")
+
     logger = get_logger(_LOGGER)
 
     try:
-        await engine.dispose()
+        await _engine.dispose()
+        _engine = None
+        _sessionmaker = None
         logger.info("Database connection pool closed successfully")
     except Exception as e:
         logger.error(f"Error closing database connection pool: {e}")
