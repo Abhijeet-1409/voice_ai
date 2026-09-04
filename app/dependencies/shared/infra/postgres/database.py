@@ -21,13 +21,26 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
+class DatabaseNotInitializedError(RuntimeError):
+    """
+    Exception raised for errors in the database initialization lifecycle.
+
+    This is triggered when a database operation (like session creation or 
+    pool disposal) is attempted before the asynchronous database engine 
+    has been fully initialized.
+    """
+    def __init__(self, message="Database engine has not been initialized. Call get_async_engine() first."):
+        self.message = message
+        super().__init__(self.message)
+
+
 def get_async_engine() -> AsyncEngine:
     """
-    Creates and configures a SQLAlchemy asynchronous engine.
+    Retrieves or creates a lazy-loaded SQLAlchemy asynchronous engine.
 
     The engine configuration is retrieved from the application settings,
-    configured with pgvector support for vector embeddings,
-    including the database URL and query echo options.
+    configured with pgvector support for vector embeddings. Once created,
+    the engine is cached in a module-level singleton variable.
 
     Returns:
         AsyncEngine: The configured asynchronous database engine instance.
@@ -59,21 +72,24 @@ def get_async_engine() -> AsyncEngine:
 
 def get_async_sessionmaker() -> async_sessionmaker[AsyncSession]:
     """
-    Creates a SQLAlchemy asynchronous session factory.
+    Retrieves or creates a lazy-loaded SQLAlchemy asynchronous session factory.
 
-    Configures a sessionmaker bound to the async engine, ensuring that
+    Configures a sessionmaker bound to the cached async engine, ensuring that
     `expire_on_commit` is disabled to prevent accidental lazy-loading errors
-    after a transaction commits.
+    after a transaction commits. Caches the factory at the module level.
 
     Returns:
         async_sessionmaker[AsyncSession]: A factory for generating new AsyncSession instances.
+        
+    Raises:
+        DatabaseNotInitializedError: If the async engine fails to initialize or is None.
     """
     global _sessionmaker
 
     engine: AsyncEngine = get_async_engine()
 
     if engine is None:
-        raise RuntimeError("Initialize database engine.....")
+        raise DatabaseNotInitializedError("Initialize database engine.....")
 
     if _sessionmaker:
         return _sessionmaker
@@ -91,16 +107,15 @@ def get_async_sessionmaker() -> async_sessionmaker[AsyncSession]:
 
 async def db_init():
     """
-    Verify the database connection pool is operational on startup.
+    Verifies the database connection pool is operational on startup.
 
-    Executes a simple 'SELECT 1' test query against the database engine.
-    Logs a success message upon connection or raises a SQLAlchemyError
-    if the connection fails.
+    Executes a simple 'SELECT 1' test query against the database engine
+    to ensure the lazy-loaded singleton is functioning correctly. Logs a 
+    success message upon connection or raises an error if it fails.
 
     Raises:
         SQLAlchemyError: If the database is unreachable or connection fails.
     """
-
     engine: AsyncEngine = get_async_engine()
     logger = get_logger(_LOGGER)
 
@@ -115,16 +130,20 @@ async def db_init():
 
 async def db_close():
     """
-    Safely dispose of the database connection pool during application shutdown.
+    Safely disposes of the database connection pool during application shutdown.
 
     This ensures all connections are gracefully closed and returned to the server,
-    preventing connection leaks and noisy database error logs.
+    preventing connection leaks. It also resets the module-level singletons 
+    (`_engine` and `_sessionmaker`) to allow safe re-initialization if needed.
+
+    Raises:
+        DatabaseNotInitializedError: If called before the database engine has been initialized.
     """
     global _engine, _sessionmaker
 
     # Check the private variable directly instead of calling get_async_engine()
     if _engine is None:
-        raise RuntimeError("Initialize database first before closing...")
+        raise DatabaseNotInitializedError("Initialize database first before closing...")
 
     logger = get_logger(_LOGGER)
 
