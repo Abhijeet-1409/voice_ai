@@ -1,26 +1,18 @@
-import asyncio
-import json
-import logging
-
 from livekit.agents import AgentServer, JobProcess, JobContext, cli
+
+from shared.logging_setup import get_logger
 
 from agent.job_entrypoint import entrypoint as _entrypoint
 from config.worker_settings import get_worker_settings
 
-from shared.infra.postgres import db_init
-from shared.infra.redis import ping_redis
-
 from rag import get_embedding_model
 
-settings = get_worker_settings()
 
-logger = logging.getLogger("worker.agent_runner")
-logger.setLevel(settings.LOG_LEVEL)
-if not logger.handlers:
-    _handler = logging.StreamHandler()
-    _handler.setLevel(settings.LOG_LEVEL)
-    _handler.setFormatter(logging.Formatter(settings.LOG_FORMAT, settings.DATA_FORMAT))
-    logger.addHandler(_handler)
+_LOGGER = "worker.agent_runner"
+
+
+settings = get_worker_settings()
+logger = get_logger(_LOGGER)
 
 
 # Load environment-specific worker configurations and initialize the LiveKit AgentServer.
@@ -33,50 +25,29 @@ server = AgentServer(
 )
 
 
-async def _prewarm_async(proc: JobProcess):
+def prewarm(proc: JobProcess):
     """
-    Initializes global resources before the worker begins accepting jobs.
+    Pre-warms the worker process before it starts accepting jobs.
 
-    This function runs exactly once per worker process during the startup
-    phase. It establishes essential connections to PostgreSQL and Redis.
-    If these dependencies fail to connect, the exception will crash the
-    process early, preventing the worker from accepting calls it cannot handle.
+    This synchronous entrypoint is executed by the LiveKit agent framework 
+    during worker initialization. It is used to preload heavy, CPU-bound 
+    assets (such as the embedding model) into memory to eliminate cold-start 
+    latency on the first incoming call.
+
+    Note: Only load CPU-bound assets here. Avoid initializing network-bound 
+    clients (like database connection pools or Redis clients) in this step, 
+    as they can cause connection drops or corruption when the process forks.
 
     Args:
-        proc (JobProcess): The LiveKit process context managing this worker.
-
-    Raises:
-        RuntimeError: If Redis fails the ping test.
-        Exception: Propagates any unexpected database initialization errors.
+        proc (JobProcess): The worker process context provided by the framework.
     """
-    try:
-        logger.info("Starting worker prewarm sequence: Initializing database...")
-        await db_init()
-
-        logger.info("Database initialized successfully. Verifying Redis connection...")
-        if not await ping_redis():
-            raise RuntimeError("Redis unreachable at startup — transcript storage unavailable")
-
-        logger.info("Redis connection verified. Prewarm sequence complete.")
-
-        logger.info("Loading embedding model...")
-        get_embedding_model()
-        logger.info("Embedding model loaded and cached.")
-
-    except Exception as e:
-        logger.critical(f"Fatal error during prewarm: {e}")
-        raise
-
-
-def prewarm(proc: JobProcess):
-    """Sync entrypoint required by setup_fnc — runs the async logic to completion."""
-    asyncio.run(_prewarm_async(proc))
+    get_embedding_model()  # Preload the embedding model to reduce latency on first use
 
 
 server.setup_fnc = prewarm
 
 
-@server.rtc_session(agent_name=settings.AGENT_NAME)
+@server.rtc_session()
 async def entrypoint(ctx: JobContext):
     """
     The main WebRTC session entrypoint for all incoming LiveKit jobs.
