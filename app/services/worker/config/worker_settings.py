@@ -1,5 +1,7 @@
 from functools import cache
 
+from pydantic import Field
+
 from shared.config import AppBaseSettings
 
 
@@ -34,6 +36,14 @@ class WorkerSettings(AppBaseSettings):
     CARTESIA_VOICE_ID: str
     CARTESIA_STT_MODEL: str = "ink-whisper"
     CARTESIA_TTS_MODEL: str = "sonic-multilingual"
+    CARTESIA_TTS_LANGUAGE: str = "en"
+
+    # ── Deepgram ───────────────────────────────────────────────────────────────
+    DEEPGRAM_API_KEY: str
+    DEEPGRAM_STT_MODEL: str = "nova-3"
+    DEEPGRAM_STT_LANGUAGE: str = "multi"
+    DEEPGRAM_STT_ENDPOINTING_MS: int = 300
+    DEEPGRAM_STT_KEYTERMS: list[str] = Field(default_factory=list)
 
     # ── Livekit ──────────────────────────────────────────────────────────────────
     LIVEKIT_URL: str
