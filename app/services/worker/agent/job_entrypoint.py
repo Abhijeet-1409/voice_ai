@@ -15,8 +15,11 @@ from schemas import UserData
 from .agent_factory import build_agent 
 from .session import create_agent_session
 from .key_selector import select_gemini_key
-from .event_handlers import on_close, on_error, on_conversation_item_added, on_function_tools_executed
+from .event_handlers import on_close, on_error, on_conversation_item_added, on_function_tools_executed, on_user_input_transcribed
 from utils import lookup_customer
+from config import get_worker_settings
+from speech import OutputLanguage
+from speech.adapters import CartesiaOutputLanguage
 
 
 _LOGGER = "worker.agent.entrypoint"
@@ -45,6 +48,8 @@ async def entrypoint(ctx: JobContext) -> None:
                    to let the framework cleanly terminate the job.
     """
     try:
+        settings = get_worker_settings()
+
         await db_init()  # ensure the database engine is initialized before any DB operations
         await ping_redis()  # ensure Redis is reachable
 
@@ -101,10 +106,18 @@ async def entrypoint(ctx: JobContext) -> None:
         user_data.is_realtime_model = isinstance(session.llm, RealtimeModel) 
         agent = build_agent(user_data)
 
+        # determine the output language controller for TTS, if TTS is enabled
+        language = settings.CARTESIA_TTS_LANGUAGE
+        output_language: OutputLanguage | None = CartesiaOutputLanguage(language,session.tts) if session.tts is not None else None
+
         # register event handlers
         session.on(
             "conversation_item_added",
             partial(on_conversation_item_added, stream_sid=stream_sid),
+        )
+        session.on(
+            "user_input_transcribed",
+            partial(on_user_input_transcribed, stream_sid=stream_sid, output_language=output_language)
         )
         session.on(
             "close",
