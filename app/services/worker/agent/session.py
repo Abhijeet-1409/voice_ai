@@ -1,6 +1,6 @@
 from livekit.plugins import google
 from livekit.agents import AgentSession
-from livekit.plugins import silero, cartesia
+from livekit.plugins import silero, cartesia, deepgram
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from shared.logging_setup import get_logger
@@ -45,9 +45,16 @@ def create_agent_session(api_key: str, user_data: UserData) -> AgentSession[User
     session = AgentSession[UserData](
         userdata=user_data,
         vad=silero.VAD.load(),
-        stt=cartesia.STT(
-            api_key=settings.CARTESIA_API_KEY,
-            model=settings.CARTESIA_STT_MODEL,
+        stt = deepgram.STT(
+            model=settings.DEEPGRAM_STT_MODEL,
+            language=settings.DEEPGRAM_STT_LANGUAGE,
+            detect_language=True,
+            interim_results=True,
+            punctuate=True,
+            smart_format=False,
+            endpointing_ms=settings.DEEPGRAM_STT_ENDPOINTING_MS,
+            filler_words=True,
+            keyterm=settings.DEEPGRAM_STT_KEYTERMS
         ),
         llm=google.LLM(
             model=settings.GEMINI_MODEL,
