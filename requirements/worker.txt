@@ -34,7 +34,7 @@ openpyxl==3.1.5
 # Database
 sqlalchemy==2.0.36
 asyncpg==0.30.0
-pgvector==0.3.6
+pgvector==0.5.0
 
 # Local environment loading
 python-dotenv==1.0.1
