@@ -117,7 +117,7 @@ async def entrypoint(ctx: JobContext) -> None:
         )
         session.on(
             "user_input_transcribed",
-            partial(on_user_input_transcribed, stream_sid=stream_sid, output_language=output_language)
+            partial(on_user_input_transcribed, output_language=output_language)
         )
         session.on(
             "close",
