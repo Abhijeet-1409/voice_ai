@@ -18,6 +18,7 @@ livekit==1.1.12
 livekit-agents~=1.6.4
 livekit-agents[cartesia]~=1.5
 livekit-plugins-google~=1.6.4
+livekit-plugins-deepgram~=1.6.4
 livekit-plugins-noise-cancellation~=0.2
 livekit-agents[silero,turn-detector]~=1.6.4
 
