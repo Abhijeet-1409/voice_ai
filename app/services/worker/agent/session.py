@@ -48,7 +48,7 @@ def create_agent_session(api_key: str, user_data: UserData) -> AgentSession[User
         stt = deepgram.STT(
             model=settings.DEEPGRAM_STT_MODEL,
             language=settings.DEEPGRAM_STT_LANGUAGE,
-            detect_language=True,
+            detect_language=False,
             interim_results=True,
             punctuate=True,
             smart_format=False,
