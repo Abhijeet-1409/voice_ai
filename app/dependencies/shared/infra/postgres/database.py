@@ -1,8 +1,6 @@
-from sqlalchemy import event, text
+from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine, AsyncSession, async_sessionmaker
-
-from pgvector.asyncpg import register_vector
 
 from shared.logging_setup import get_logger
 from shared.config import get_app_settings, AppBaseSettings
@@ -60,12 +58,6 @@ def get_async_engine() -> AsyncEngine:
     )
 
     _engine = engine
-
-    # Listen for every new database connection created by the pool
-    @event.listens_for(engine.sync_engine, "connect")
-    def register_custom_types(dbapi_connection, connection_record):
-        # Instruct the asyncpg driver to load the pgvector codec
-        dbapi_connection.run_async(lambda conn: register_vector(conn))
 
     return engine
 
