@@ -28,7 +28,7 @@ async def run_ingestion() -> None:
         return
 
     try:
-        vectors = model.encode(texts, show_progress_bar=False)
+        vectors = model.encode(texts, show_progress_bar=False, convert_to_numpy=True)
 
         items = [(text_val, vector.tolist()) for text_val, vector in zip(texts, vectors)]
 
