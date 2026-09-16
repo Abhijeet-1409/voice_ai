@@ -82,60 +82,60 @@ def on_conversation_item_added(
     )
 
 
-# ── User language detector handler ────────────────────────────────────────────
-def on_user_input_transcribed(
-    event: UserInputTranscribedEvent,
-    output_language: OutputLanguage | None = None,
-) -> None:
-    """
-    Handles transcription events for incoming user input and updates the target
-    output language when a final transcription has a detected language.
-    """
-    if output_language is None:
-        logger.warning(
-            f"User input transcribed event received but no output language "
-            f"controller is configured"
-        )
-        return
+# # ── User language detector handler ────────────────────────────────────────────
+# def on_user_input_transcribed(
+#     event: UserInputTranscribedEvent,
+#     output_language: OutputLanguage | None = None,
+# ) -> None:
+#     """
+#     Handles transcription events for incoming user input and updates the target
+#     output language when a final transcription has a detected language.
+#     """
+#     if output_language is None:
+#         logger.warning(
+#             f"User input transcribed event received but no output language "
+#             f"controller is configured"
+#         )
+#         return
 
-    if not event.is_final:
-        return
+#     if not event.is_final:
+#         return
 
-    if event.language is None:
-        logger.warning(
-            f"User input transcribed event received but no language was detected"
-        )
-        return
+#     if event.language is None:
+#         logger.warning(
+#             f"User input transcribed event received but no language was detected"
+#         )
+#         return
 
-    language_code: LanguageCode = event.language
-    current_language = output_language.get_language()
-    new_language = language_code.language
+#     language_code: LanguageCode = event.language
+#     current_language = output_language.get_language()
+#     new_language = language_code.language
 
-    if current_language == new_language:
-        logger.debug(
-            f"Detected language '{new_language}' matches current output language"
-        )
-        return
+#     if current_language == new_language:
+#         logger.debug(
+#             f"Detected language '{new_language}' matches current output language"
+#         )
+#         return
 
-    try:
-        output_language.set_language(new_language)
+#     try:
+#         output_language.set_language(new_language)
 
-        logger.info(
-            f"Output language updated from '{current_language}' "
-            f"to '{new_language}'"
-        )
+#         logger.info(
+#             f"Output language updated from '{current_language}' "
+#             f"to '{new_language}'"
+#         )
 
-    except ValueError as val_err:
-        logger.error(
-            f"Failed to update output language to '{new_language}' "
-            f"from detected user input: {val_err}"
-        )
+#     except ValueError as val_err:
+#         logger.error(
+#             f"Failed to update output language to '{new_language}' "
+#             f"from detected user input: {val_err}"
+#         )
 
-    except Exception:
-        logger.exception(
-            f"Unexpected error while updating output language to "
-            f"'{new_language}' from detected user input"
-        )
+#     except Exception:
+#         logger.exception(
+#             f"Unexpected error while updating output language to "
+#             f"'{new_language}' from detected user input"
+#         )
 
 
 # ── Tool call handler ─────────────────────────────────────────────────────────
