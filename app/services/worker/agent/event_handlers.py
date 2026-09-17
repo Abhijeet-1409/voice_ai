@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime, timezone
+from functools import partial
 
 from livekit.agents.voice import (
     ConversationItemAddedEvent,
@@ -10,6 +11,7 @@ from livekit.agents.voice import (
 )
 from livekit.agents.llm.chat_context import ChatMessage
 from livekit.agents.language import LanguageCode
+from livekit.agents import AgentSession
 
 from shared.logging_setup import get_logger
 from shared.infra.redis import append_turn, get_transcript, delete_transcript
@@ -307,3 +309,30 @@ async def _end_of_call_writes(stream_sid: str, userdata: UserData) -> None:
         )
 
     logger.info(f"End-of-call writes complete [stream_sid={stream_sid}]")
+
+
+# ── Register Event handlers ─────────────────────────────────────────────────────────────
+
+def register_event_handlers(session: AgentSession, stream_sid: str, user_data: UserData): 
+    """
+    """
+    session.on(
+        "conversation_item_added",
+        partial(on_conversation_item_added, stream_sid=stream_sid),
+    )
+    # session.on(
+    #     "user_input_transcribed",
+    #     partial(on_user_input_transcribed, output_language=output_language)
+    # )
+    session.on(
+        "close",
+        partial(on_close, stream_sid=stream_sid, userdata=user_data),
+    )
+    session.on(
+        "function_tools_executed",
+        partial(on_function_tools_executed, userdata=user_data),
+    )
+    session.on(
+        "error",
+        partial(on_error, stream_sid=stream_sid),
+    )

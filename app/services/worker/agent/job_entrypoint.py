@@ -15,8 +15,7 @@ from schemas import UserData
 from .agent_factory import build_agent 
 from .session import create_agent_session
 from .key_selector import select_gemini_key
-from .event_handlers import on_close, on_error, on_conversation_item_added, on_function_tools_executed
-# from .event_handlers import on_user_input_transcribed
+from .event_handlers import register_event_handlers
 from utils import lookup_customer
 from config import get_worker_settings
 from speech import OutputLanguage
@@ -69,9 +68,6 @@ async def entrypoint(ctx: JobContext) -> None:
         # carries the right stream_sid
         stream_sid_var.set(stream_sid)
         logger.debug(f"Room metadata: {metadata}")
-        
-        # select a key — sync, no await
-        gemini_key = select_gemini_key()
 
         # look up the caller by phone — pure lookup, never creates
         phone = metadata.get("phone")
@@ -103,36 +99,12 @@ async def entrypoint(ctx: JobContext) -> None:
             )
 
         # create the agent session and the configured assistant
-        session = create_agent_session(gemini_key, user_data)
+        session = create_agent_session(user_data)
         user_data.is_realtime_model = isinstance(session.llm, RealtimeModel) 
         agent = build_agent(user_data)
-
-        # determine the output language controller for TTS, if TTS is enabled
-        # language = settings.CARTESIA_TTS_LANGUAGE
-        # output_language: OutputLanguage | None = CartesiaOutputLanguage(language,session.tts) if session.tts is not None else None
-        # output_language= None
         
         # register event handlers
-        session.on(
-            "conversation_item_added",
-            partial(on_conversation_item_added, stream_sid=stream_sid),
-        )
-        # session.on(
-        #     "user_input_transcribed",
-        #     partial(on_user_input_transcribed, output_language=output_language)
-        # )
-        session.on(
-            "close",
-            partial(on_close, stream_sid=stream_sid, userdata=user_data),
-        )
-        session.on(
-            "function_tools_executed",
-            partial(on_function_tools_executed, userdata=user_data),
-        )
-        session.on(
-            "error",
-            partial(on_error, stream_sid=stream_sid),
-        )
+        register_event_handlers(session=session,stream_sid=stream_sid,user_data=user_data)
 
         # start the session with noise cancellation enabled
         await session.start(
@@ -142,7 +114,15 @@ async def entrypoint(ctx: JobContext) -> None:
                 audio_input=room_io.AudioInputOptions(
                     noise_cancellation=noise_cancellation.BVC(),
                 ),
+                text_output=room_io.TextOutputOptions(
+                    # output_language=output_language,
+                    sync_transcription=True
+                ),
             ),
+            # audio_output=room_io.AudioOutputOptions(
+            #     # output_language=output_language,
+            # ),
+            
         )
 
     except Exception as e:
