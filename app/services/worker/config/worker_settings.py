@@ -42,8 +42,20 @@ class WorkerSettings(AppBaseSettings):
     DEEPGRAM_API_KEY: str
     DEEPGRAM_STT_MODEL: str = "nova-3"
     DEEPGRAM_STT_LANGUAGE: str = "multi"
-    DEEPGRAM_STT_ENDPOINTING_MS: int = 300
+    DEEPGRAM_STT_ENDPOINTING_MS: int = 25
     DEEPGRAM_STT_KEYTERMS: list[str] = Field(default_factory=list)
+
+    # ── Selero VAD ───────────────────────────────────────────────────────────────
+    VAD_MIN_SPEECH_DURATION: float = 0.05
+    VAD_MIN_SILENCE_DURATION: float = 0.25
+    VAD_ACTIVATION_THRESHOLD: float = 0.5
+
+     # ── Turn handling ───────────────────────────────────────────────────────────
+    TURNHANDLING_ENDPOINTING_MODE: str = "fixed"
+    TURNHANDLING_ENDPOINTING_MIN_DELAY: float = 0.25
+    TURNHANDLING_ENDPOINTING_MAX_DELAY: float = 0.8
+    TURNHANDLING_PREEMPTIVE_GENERATION_ENABLED: bool = True
+    TURNHANDLING_PREEMPTIVE_GENERATION_PREEMPTIVE_TTS: bool =False   
 
     # ── Livekit ──────────────────────────────────────────────────────────────────
     LIVEKIT_URL: str
