@@ -61,3 +61,4 @@ base_requirements.txt
 old_worker_requirements.txt
 turn_detector_models
 app/services/worker/speech 
+app/services/worker/agent/key_selector.py
