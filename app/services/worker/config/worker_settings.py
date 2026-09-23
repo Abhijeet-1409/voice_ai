@@ -16,6 +16,7 @@ class WorkerSettings(AppBaseSettings):
 
     # ── Agent ────────────────────────────────────────────────────────────────────
     AGENT_NAME: str
+    COMPANY_NAME: str = "Writer Information"
 
     # ── LLM ────────────────────────────────────────────────────────────────────
     GEMINI_API_KEY_1: str
@@ -42,7 +43,9 @@ class WorkerSettings(AppBaseSettings):
     DEEPGRAM_API_KEY: str
     DEEPGRAM_STT_MODEL: str = "nova-3"
     DEEPGRAM_STT_LANGUAGE: str = "multi"
-    DEEPGRAM_STT_ENDPOINTING_MS: int = 25
+    DEEPGRAM_STT_ENDPOINTING_MS: int = 300
+    DEEPGRAM_STT_EOU_THRESHOLD: float = 0.7
+    DEEPGRAM_STT_EOU_TIMEOUT_MS: int = 300
     DEEPGRAM_STT_KEYTERMS: list[str] = Field(default_factory=list)
 
     # ── Selero VAD ───────────────────────────────────────────────────────────────
@@ -55,7 +58,9 @@ class WorkerSettings(AppBaseSettings):
     TURNHANDLING_ENDPOINTING_MIN_DELAY: float = 0.25
     TURNHANDLING_ENDPOINTING_MAX_DELAY: float = 0.8
     TURNHANDLING_PREEMPTIVE_GENERATION_ENABLED: bool = True
-    TURNHANDLING_PREEMPTIVE_GENERATION_PREEMPTIVE_TTS: bool =False   
+    TURNHANDLING_PREEMPTIVE_GENERATION_PREEMPTIVE_TTS: bool =False  
+    TURNHANDLING_PREEMPTIVE_GENERATION_PREEMPTIVE_TTS_MAX_SPEECH_DURATION: int = 10
+    TURNHANDLING_PREEMPTIVE_GENERATION_PREEMPTIVE_TTS_MAX_RETRIES_PER_TURN: int = 3 
 
     # ── Livekit ──────────────────────────────────────────────────────────────────
     LIVEKIT_URL: str
