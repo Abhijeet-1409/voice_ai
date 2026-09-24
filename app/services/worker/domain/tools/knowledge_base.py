@@ -16,27 +16,35 @@ logger = get_logger(_LOGGER)
 @function_tool
 async def search_knowledge_base(ctx: RunContext, query: str) -> str:
     """
-    Searches the vector knowledge base for verified information about 
-    Intelics. Currently contains pricing and infrastructure details —
-    more documents will be added over time.
+    Searches the vector knowledge base for Intelics Cloud pricing
+    information. Currently scoped to pricing only — does not contain
+    general company information, AWS partner program details, or
+    infrastructure/technical documentation. More documents may be
+    added over time.
 
-    Call this tool for any specific factual question about Intelics 
-    that is not covered by your instructions directly. Do NOT call 
-    this tool for general questions about the three AWS partner tracks
-    (Billing Transfer, Green Field Migration, VMware Workload Migration)
-    — answer those directly from your instructions.
+    Call this tool ONLY for specific pricing questions about Intelics
+    Cloud services (compute, storage, network, backups, etc.). Do NOT
+    call this tool for:
+    - The three AWS partner programs (Billing Transfer, Green Field
+      Migration, VMware Workload Migration) — answer those directly
+      from your instructions.
+    - Any non-pricing question about Writer Information, Intelics
+      Cloud, or the AWS partner programs — these are not covered by
+      this tool. Let the caller know a specialist will follow up
+      instead of calling this tool or guessing.
 
     Args:
         ctx (RunContext): The LiveKit agent execution context.
-        query (str): The search query or specific topic to look up.
+        query (str): The pricing-related search query or topic to
+            look up.
 
     Returns:
-        str: A combined string of relevant text passages retrieved from 
-            the vector store, or a generic string indicating that no 
-            information was found.
+        str: A combined string of relevant pricing passages retrieved
+            from the vector store, or a generic string indicating that
+            no information was found.
 
     Raises:
-        ToolError: If the vector store is unreachable or if an unexpected exception occurs 
+        ToolError: If the vector store is unreachable or if an unexpected exception occurs
             during embedding generation or vector retrieval.
     """
     try:
