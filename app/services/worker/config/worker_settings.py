@@ -31,13 +31,14 @@ class WorkerSettings(AppBaseSettings):
     PROJECT: str | None
     LOCATION: str | None
     VERTEXAI: bool | None = False
+    CACHED_CONTENT_TTL: int = 600
 
     # ── Cartesia ───────────────────────────────────────────────────────────────
     CARTESIA_API_KEY: str
     CARTESIA_VOICE_ID: str
     CARTESIA_STT_MODEL: str = "ink-whisper"
-    CARTESIA_TTS_MODEL: str = "sonic-multilingual"
-    CARTESIA_TTS_LANGUAGE: str = "en"
+    CARTESIA_TTS_MODEL: str = "sonic-3.5"
+    CARTESIA_TTS_LANGUAGE: str = "multi"
 
     # ── Deepgram ───────────────────────────────────────────────────────────────
     DEEPGRAM_API_KEY: str
