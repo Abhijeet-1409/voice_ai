@@ -4,8 +4,9 @@ from livekit.agents.llm import FunctionTool
 from shared.config import Track
 from shared.logging_setup import get_logger
 
+from schemas import UserData
+from utils import build_user_context_block
 from tasks import ConfirmEmailTask, ChooseSlotTask
-
 
 _LOGGER = "worker.agent.assistant"
 logger = get_logger(_LOGGER)
@@ -22,14 +23,31 @@ class Assistant(Agent):
     access.
     """
 
-    def __init__(self, instructions: str, tools: list[FunctionTool], enum_refernce: str, name: str) -> None:
+    def __init__(
+            self, 
+            name: str, 
+            company_name: str, 
+            instructions: str, 
+            tools: list[FunctionTool], 
+            user_data: UserData | None = None
+        ) -> None:
         logger.info("Initializing Assistant agent")
         self.name = name
-        self.enum_refernce = enum_refernce
+        self.company_name = company_name
+        self.user_data = user_data
+        
         super().__init__(
             instructions=instructions,
             tools=tools,
         )
+
+    async def on_enter(self):
+        if not self.user_data:
+            return
+        user_context = build_user_context_block(userdata=self.user_data)
+        new_ctx = self.chat_ctx.copy()  # get a mutable copy first
+        new_ctx.add_message(role='system', content=f"# CALLER CONTEXT\n{user_context}")
+        await self.update_chat_ctx(new_ctx)
 
     @function_tool()
     async def schedule_meeting(self, ctx: RunContext, track: Track) -> str:
