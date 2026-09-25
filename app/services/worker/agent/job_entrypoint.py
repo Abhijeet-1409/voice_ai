@@ -99,7 +99,7 @@ async def entrypoint(ctx: JobContext) -> None:
             )
 
         # create the agent session and the configured assistant
-        session = create_agent_session(user_data)
+        session = await create_agent_session(user_data)
         user_data.is_realtime_model = isinstance(session.llm, RealtimeModel) 
         agent = build_agent(user_data)
         
