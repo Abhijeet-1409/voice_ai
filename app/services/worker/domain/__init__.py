@@ -1,9 +1,9 @@
 from . import tools
-from .system_prompt import INBOUND_PROMPT, OUTREACH_PROMPT, DEFAULT_PROMPT
+from .system_prompt import INBOUND_SYSTEM_PROMPT, OUTREACH_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT
 
 __all__ = [
     "tools",
-    "INBOUND_PROMPT",
-    "OUTREACH_PROMPT",
-    "DEFAULT_PROMPT",
+    "INBOUND_SYSTEM_PROMPT",
+    "OUTREACH_SYSTEM_PROMPT",
+    "DEFAULT_SYSTEM_PROMPT",
 ]
