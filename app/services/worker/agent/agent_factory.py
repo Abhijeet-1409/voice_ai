@@ -7,7 +7,7 @@ from .assistant import Assistant
 from config import get_worker_settings
 from schemas.session_data import UserData
 from utils import describe_all
-from domain import OUTREACH_PROMPT, INBOUND_PROMPT, DEFAULT_PROMPT
+from domain import INBOUND_SYSTEM_PROMPT, OUTREACH_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT
 from domain.tools import search_knowledge_base, update_caller_info, create_ticket, get_tickets, qualify_lead
 
 
@@ -39,16 +39,16 @@ def build_instruction(user_data: UserData) -> str:
     
     match call_type:
         case CallType.OUTREACH:
-            prompt_template = OUTREACH_PROMPT
+            prompt_template = OUTREACH_SYSTEM_PROMPT
             enum_reference = describe_all(Track)
 
         case CallType.INBOUND:
-            prompt_template = INBOUND_PROMPT
+            prompt_template = INBOUND_SYSTEM_PROMPT
             enum_reference = describe_all(Track, TicketPriority, TicketStatus)
 
         case _:
             logger.warning(f"Unrecognized call_type='{call_type}' — falling back to DEFAULT_PROMPT.")
-            prompt_template = DEFAULT_PROMPT
+            prompt_template = DEFAULT_SYSTEM_PROMPT
             enum_reference = ""
 
     instructions = prompt_template.format(
