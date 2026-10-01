@@ -1,9 +1,9 @@
 import json
-from functools import partial
+import asyncio
 
 from livekit.plugins import noise_cancellation
-from livekit.agents import room_io, AutoSubscribe, JobContext
 from livekit.agents.llm import RealtimeModel
+from livekit.agents import ChatContext, room_io, AutoSubscribe, JobContext
 
 from shared.call_context import stream_sid_var
 from shared.logging_setup import get_logger
@@ -12,14 +12,12 @@ from shared.infra.postgres import db_init
 from shared.infra.redis import ping_redis
 
 from schemas import UserData
+from config import get_worker_settings
 from .agent_factory import build_agent 
 from .session import create_agent_session
-from .key_selector import select_gemini_key
 from .event_handlers import register_event_handlers
-from utils import lookup_customer
-from config import get_worker_settings
-from speech import OutputLanguage
-from speech.adapters import CartesiaOutputLanguage
+from .prompt_cache import create_prompt_cache
+from utils import lookup_customer, build_user_context_block, build_instruction
 
 
 _LOGGER = "worker.agent.entrypoint"
@@ -98,10 +96,41 @@ async def entrypoint(ctx: JobContext) -> None:
                 email=metadata.get("email"),
             )
 
-        # create the agent session and the configured assistant
-        session = await create_agent_session(user_data)
+        # create user context block 
+        user_context_block = build_user_context_block(user_data)
+
+        # create system instruction 
+        system_instructions = build_instruction(user_data)
+
+        # create chat context and adding user context block to the chat context
+        chat_ctx = ChatContext()
+        chat_ctx.add_message(
+            role="system",
+            content=(
+                "Current Customer Context\n\n"
+                "The following information represents the current customer state "
+                "for this conversation.\n"
+                "Use it as background context when relevant.\n\n"
+                f"{user_context_block}"
+            ),
+        )
+
+        # build agent with system instruction and chat context
+        agent = build_agent(user_data, system_instructions, chat_ctx=chat_ctx)
+
+        # create cached_content    
+        cached_content = await asyncio.to_thread(
+            create_prompt_cache,
+            user_data,
+            system_instructions,
+            agent.tools,
+        )
+        
+        # create agent session with userdata and cached content
+        session = await create_agent_session(user_data, cached_content=cached_content)
+        
+        # setting is_realtime_model flag on user_data 
         user_data.is_realtime_model = isinstance(session.llm, RealtimeModel) 
-        agent = build_agent(user_data)
         
         # register event handlers
         register_event_handlers(session=session,stream_sid=stream_sid,user_data=user_data)
