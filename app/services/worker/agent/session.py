@@ -1,76 +1,23 @@
 import asyncio
 from typing import Optional
 
-from livekit.plugins import google
+import livekit.plugins.google as livekit_google_plugin
 from livekit.agents import AgentSession, TurnHandlingOptions
-from livekit.plugins import silero, cartesia, deepgram 
+from livekit.plugins import silero, cartesia, deepgram, sarvam
 
 from google.genai.client import Client
-from google.genai.types import CachedContent
 
 from shared.logging_setup import get_logger
 
 from schemas import UserData
 from config import get_worker_settings
-from .agent_factory import build_instruction
 
 
 _LOGGER = "worker.agent.session"
 logger = get_logger(_LOGGER)
 
 
-def create_prompt_cache(user_data: UserData) -> Optional[str]:
-    """
-    Creates a context cache on Vertex AI for the system instructions.
-
-    Constructs the system prompt based on call type metadata and registers it 
-    with Vertex AI under a dedicated display name and configured TTL. 
-    Caching system prompts reduces latency and token processing costs for subsequent requests.
-
-    Args:
-        user_data (UserData): The session context containing call type and user metadata.
-
-    Returns:
-        Optional[str]: The resource name of the created Vertex AI cache (e.g., 'cachedContents/1234567890'), 
-        or None if cache creation fails.
-    """
-    settings = get_worker_settings()
-
-    try:
-        client = Client(
-            enterprise=True, 
-            project=settings.PROJECT, 
-            location=settings.LOCATION
-        )
-
-        system_instruction = build_instruction(user_data)
-        logger.debug(f"Cache system_instruction length: {len(system_instruction)} chars")
-        cache_display_name = f"{user_data.call_type.value}_system_prompt"
-
-        cached_content: CachedContent = client.caches.create(
-            model=settings.GEMINI_MODEL,
-            config={
-                "display_name": cache_display_name,
-                "system_instruction": system_instruction,
-                "ttl": f"{settings.CACHED_CONTENT_TTL}s",
-            }
-        )
-
-        logger.info(
-            f"Successfully created Vertex AI prompt cache '{cached_content.name}' "
-            f"[display_name={cache_display_name}, stream_sid={user_data.stream_sid}]"
-        )
-        return cached_content.name
-
-    except Exception as err:
-        logger.error(
-            f"Failed to create Vertex AI prompt cache for call_type='{user_data.call_type}' "
-            f"[stream_sid={user_data.stream_sid}]: {err}",
-        )
-        return None
-
-
-async def _warm_llm(user_data: UserData, llm: google.LLM) -> None:
+async def _warm_llm(user_data: UserData, llm: livekit_google_plugin.LLM) -> None:
     """
     Executes a lightweight, dummy generation request to pre-warm the Vertex AI LLM client.
 
@@ -116,7 +63,7 @@ async def _warm_tts(user_data: UserData, tts: cartesia.TTS) -> None:
         logger.warning(f"TTS warm-up failed (non-fatal) [stream_sid={user_data.stream_sid}]: {err}")
 
 
-async def warm_up_pipeline(user_data: UserData, llm: google.LLM, tts: cartesia.TTS) -> None:
+async def warm_up_pipeline(user_data: UserData, llm: livekit_google_plugin.LLM, tts: cartesia.TTS) -> None:
     """
     Concurrently executes pre-warming routines for pipeline components (LLM and TTS).
 
@@ -138,18 +85,20 @@ async def warm_up_pipeline(user_data: UserData, llm: google.LLM, tts: cartesia.T
             logger.warning(f"Warm-up pipeline step raised unexpectedly [stream_sid={user_data.stream_sid}]: {res}")
 
 
-async def create_agent_session(user_data: UserData) -> AgentSession[UserData]:
+async def create_agent_session(user_data: UserData, cached_content: Optional[str] = None) -> AgentSession[UserData]:
     """
     Creates and configures a new LiveKit AgentSession for an incoming voice call.
 
     Assembles a complete voice processing pipeline combining local Voice Activity 
     Detection (Silero), STT (Deepgram v2), turn handling options, Gemini LLM via 
-    Vertex AI with context caching, and Cartesia TTS. Binds the provided UserData instance 
-    directly to the session lifecycle.
+    Vertex AI with optional context caching, and Cartesia TTS. Binds the provided 
+    UserData instance directly to the session lifecycle.
 
     Args:
         user_data (UserData): The session context instance containing caller profile 
             and call metadata.
+        cached_content (Optional[str], optional): The resource name of a pre-created Vertex AI 
+            prompt cache to attach to the LLM configuration. Defaults to None.
 
     Returns:
         AgentSession[UserData]: The initialized voice agent session ready for live room execution.
@@ -158,20 +107,23 @@ async def create_agent_session(user_data: UserData) -> AgentSession[UserData]:
 
     logger.info(f"Initializing AgentSession for stream [{user_data.stream_sid}]")
 
-    cache_name = create_prompt_cache(user_data)
-
     vad = silero.VAD.load(
         min_speech_duration=settings.VAD_MIN_SPEECH_DURATION,
         min_silence_duration=settings.VAD_MIN_SILENCE_DURATION,
         activation_threshold=settings.VAD_ACTIVATION_THRESHOLD,
     )
 
-    stt = deepgram.STTv2(
-        model=settings.DEEPGRAM_STT_MODEL,             
-        language_hint=["hi", "en", "mr", "bn", "ta", "te", "gu", "kn", "ml", "ur"],
-        keyterm=settings.DEEPGRAM_STT_KEYTERMS,
-        eot_threshold=settings.DEEPGRAM_STT_EOU_THRESHOLD,
-        eot_timeout_ms=settings.DEEPGRAM_STT_EOU_TIMEOUT_MS,
+    # stt = deepgram.STTv2(
+    #     model=settings.DEEPGRAM_STT_MODEL,             
+    #     language_hint=["hi", "en", "mr", "bn", "ta", "te", "gu", "kn", "ml", "ur"],
+    #     keyterm=settings.DEEPGRAM_STT_KEYTERMS,
+    #     eot_threshold=settings.DEEPGRAM_STT_EOU_THRESHOLD,
+    #     eot_timeout_ms=settings.DEEPGRAM_STT_EOU_TIMEOUT_MS,
+    # )
+
+    stt = cartesia.STT(
+        model=settings.CARTESIA_STT_MODEL,
+        api_key=settings.CARTESIA_API_KEY,
     )
 
     turn_handling = TurnHandlingOptions(
@@ -189,7 +141,7 @@ async def create_agent_session(user_data: UserData) -> AgentSession[UserData]:
         },
     )
 
-    llm = google.LLM(
+    llm = livekit_google_plugin.LLM(
         model=settings.GEMINI_MODEL,
         temperature=settings.GEMINI_TEMPERATURE,
         max_output_tokens=settings.GEMINI_TOKEN_LIMIT,
@@ -197,7 +149,7 @@ async def create_agent_session(user_data: UserData) -> AgentSession[UserData]:
         vertexai=settings.VERTEXAI,
         project=settings.PROJECT,
         location=settings.LOCATION,
-        cached_content=cache_name,
+        cached_content=cached_content,
     )
 
     tts = cartesia.TTS(
@@ -207,9 +159,7 @@ async def create_agent_session(user_data: UserData) -> AgentSession[UserData]:
         language=settings.CARTESIA_TTS_LANGUAGE
     )
 
-    logger.info(f"llm cachce conent: {llm._opts.cached_content}")
     await warm_up_pipeline(user_data, llm, tts)
-
 
     session = AgentSession[UserData](
         userdata=user_data,
