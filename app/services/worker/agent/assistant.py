@@ -1,5 +1,5 @@
-from livekit.agents import Agent, function_tool, RunContext
 from livekit.agents.llm import FunctionTool
+from livekit.agents import Agent, ChatContext, function_tool, RunContext
 
 from shared.config import Track
 from shared.logging_setup import get_logger
@@ -29,7 +29,8 @@ class Assistant(Agent):
             company_name: str, 
             instructions: str, 
             tools: list[FunctionTool], 
-            user_data: UserData | None = None
+            user_data: UserData | None = None,
+            chat_ctx: ChatContext | None = None
         ) -> None:
         logger.info("Initializing Assistant agent")
         self.name = name
@@ -39,15 +40,8 @@ class Assistant(Agent):
         super().__init__(
             instructions=instructions,
             tools=tools,
+            chat_ctx=chat_ctx
         )
-
-    async def on_enter(self):
-        if not self.user_data:
-            return
-        user_context = build_user_context_block(userdata=self.user_data)
-        new_ctx = self.chat_ctx.copy()  # get a mutable copy first
-        new_ctx.add_message(role='system', content=f"# CALLER CONTEXT\n{user_context}")
-        await self.update_chat_ctx(new_ctx)
 
     @function_tool()
     async def schedule_meeting(self, ctx: RunContext, track: Track) -> str:
