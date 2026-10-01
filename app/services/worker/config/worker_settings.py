@@ -40,6 +40,9 @@ class WorkerSettings(AppBaseSettings):
     CARTESIA_TTS_MODEL: str = "sonic-3.5"
     CARTESIA_TTS_LANGUAGE: str = "multi"
 
+    # ── Sarvam ───────────────────────────────────────────────────────────────
+    SARVAM_API_KEY: str
+
     # ── Deepgram ───────────────────────────────────────────────────────────────
     DEEPGRAM_API_KEY: str
     DEEPGRAM_STT_MODEL: str = "nova-3"
