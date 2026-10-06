@@ -1,5 +1,5 @@
 from livekit.agents import ChatContext
-from livekit.agents.llm import FunctionTool
+from livekit.agents.llm import FunctionTool, LLM
 
 from shared.config import CallType
 from shared.logging_setup import get_logger
@@ -19,7 +19,12 @@ SUPPORT_TOOLS: list[FunctionTool] = [create_ticket, get_tickets]
 SALES_TOOLS: list[FunctionTool] = [qualify_lead]
 
 
-def build_agent(user_data: UserData, instructions: str, chat_ctx: ChatContext | None = None) -> Assistant:
+def build_agent(
+    user_data: UserData, 
+    instructions: str, 
+    chat_ctx: ChatContext | None = None, 
+    task_llm: LLM | None = None
+) -> Assistant:
     """
     Constructs and configures an Assistant instance tailored to the given call's context.
 
@@ -36,6 +41,8 @@ def build_agent(user_data: UserData, instructions: str, chat_ctx: ChatContext | 
         instructions (str): The system prompt instructions to configure on the assistant.
         chat_ctx (ChatContext | None, optional): An existing conversation history context 
             to restore or initialize the assistant with. Defaults to None.
+        task_llm (LLM | None, optional): An optional secondary LLM instance designated 
+            for processing background sub-tasks. Defaults to None.
 
     Returns:
         Assistant: A fully configured Assistant instance ready for the voice session.
@@ -59,7 +66,8 @@ def build_agent(user_data: UserData, instructions: str, chat_ctx: ChatContext | 
         name=settings.AGENT_NAME,
         company_name=settings.COMPANY_NAME,
         user_data=user_data,
-        chat_ctx=chat_ctx
+        chat_ctx=chat_ctx,
+        task_llm=task_llm
     )
 
     logger.debug(
