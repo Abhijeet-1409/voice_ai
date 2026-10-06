@@ -1,8 +1,11 @@
 from typing import Optional
 
 from livekit.agents import AgentTask, ChatContext, function_tool
+from livekit.agents.llm import LLM
 
 from shared.logging_setup import get_logger
+
+from domain import CONFIRM_EMAIL_TASK_PROMPT
 
 
 __LOGGER = "worker.tasks.confirm_email_task"
@@ -10,82 +13,79 @@ logger = get_logger(__LOGGER)
 
 
 class ConfirmEmailTask(AgentTask[str]):
-    """Resolves a confirmed email address over voice.
+    """Task that verifies or collects an email address over a voice session.
 
-    Two entry paths, chosen automatically based on whether a candidate
-    email is already known:
-      - candidate_email given (e.g. from a returning caller's CRM
-        record, or already set earlier this call via update_caller_info):
-        reads it back and asks for a yes/no-or-correction, rather than
-        asking the caller to state their email from scratch.
-      - candidate_email is None (or the caller says it's wrong): asks
-        for the email fresh, spelling out the local part character by
-        character when it contains uncommon words, numbers, or is
-        otherwise ambiguous.
+    Handles two conversational paths based on initial input:
+      1. Candidate email available: Reads the address back for confirmation or correction.
+      2. No candidate email (or incorrect): Requests a new email address, spelling out
+         the local part character-by-character when necessary.
 
-    Either path requires explicit user confirmation before completing,
-    enforced via a `read_back` self-report flag on `submit_email` rather
-    than trusting the LLM's judgment alone.
+    Enforces explicit user verification before completing via a `read_back` confirmation
+    flag required by `submit_email`.
 
-    Result:
-        The confirmed email address as a `str`.
+    Attributes:
+        candidate_email (Optional[str]): Initial candidate email address passed into the task.
+        task_llm (Optional[LLM]): Specialized LLM instance used for task execution.
     """
-    def __init__(self, candidate_email: Optional[str] = None, chat_ctx: Optional[ChatContext] = None):
+
+    def __init__(
+        self,
+        candidate_email: Optional[str] = None,
+        chat_ctx: Optional[ChatContext] = None,
+        task_llm: Optional[LLM] = None,
+    ) -> None:
+        """Initializes a new ConfirmEmailTask instance.
+
+        Args:
+            candidate_email (Optional[str]): Existing candidate email to verify, if known.
+                Defaults to None.
+            chat_ctx (Optional[ChatContext]): Pre-existing chat context. Defaults to None.
+            task_llm (Optional[LLM]): LLM instance dedicated to task execution. Defaults to None.
+        """
+        self.task_llm = task_llm
+
         logger.info("Initializing ConfirmEmailTask with candidate_email: %s", candidate_email)
         super().__init__(
-            instructions="""
-            If a candidate email is provided in your context, read it
-            back to the user and ask them to confirm it's still correct,
-            or provide a different one if not.
-
-            If no candidate email is provided, or the user says the
-            candidate is wrong, ask the user for their email address.
-            Once they provide it, repeat it back to them clearly — spell
-            out the local part (before the @) character by character if
-            it contains uncommon words, numbers, or could be ambiguous —
-            and ask them to confirm it's correct.
-
-            Only call `submit_email` after the user has explicitly
-            confirmed the email (whether the candidate or a freshly
-            provided one) is correct. If they say it's wrong, ask them
-            to repeat or spell it again, then read it back and confirm
-            once more before submitting.
-            """,
+            instructions=CONFIRM_EMAIL_TASK_PROMPT,
             chat_ctx=chat_ctx,
+            llm=task_llm,
         )
         self.candidate_email = candidate_email
 
     async def on_enter(self) -> None:
+        """Lifecycle hook executed upon entering the email confirmation task.
+
+        Prompts the caller to either confirm an existing candidate email or
+        provide a new email address.
+        """
         logger.info("Entering ConfirmEmailTask")
         if self.candidate_email:
             logger.info("Asking user to confirm existing candidate_email: %s", self.candidate_email)
             await self.session.generate_reply(
                 instructions=f"""
-                Read back the email address "{self.candidate_email}" to
-                the user and ask them to confirm it's still correct, or
-                let you know if it's changed.
+                Read the email address "{self.candidate_email}" back clearly and ask the caller to confirm whether it is correct.
                 """
             )
         else:
             logger.info("No candidate email present; prompting user to provide email")
             await self.session.generate_reply(
                 instructions="""
-                Ask the user for their email address so you can confirm
-                it on file.
+                Ask the caller for their email address.
                 """
             )
 
     @function_tool
     async def submit_email(self, email: str, read_back: bool) -> str:
-        """Submit the confirmed email address.
+        """Submits the caller's confirmed email address and completes the task.
 
         Args:
-            email: The email address to submit — either the confirmed
-                candidate, or a freshly provided and confirmed one.
-            read_back: Set to True only after you have read the email
-                address back to the user character-by-character (for the
-                local part) and they have explicitly confirmed it is
-                correct.
+            email (str): The confirmed candidate or freshly collected email address.
+            read_back (bool): Must be `True` to certify that the email (and its local part)
+                was read back to the user and explicitly acknowledged as correct.
+
+        Returns:
+            str: A natural-language confirmation message or an instruction prompting
+                the LLM to complete the read-back step.
         """
         logger.info("submit_email called with email: '%s', read_back: %s", email, read_back)
 
