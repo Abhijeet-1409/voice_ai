@@ -2,6 +2,7 @@ import json
 import asyncio
 
 from livekit.plugins import noise_cancellation
+import livekit.plugins.google as livekit_google_plugin
 from livekit.agents.llm import RealtimeModel
 from livekit.agents import ChatContext, room_io, AutoSubscribe, JobContext
 
@@ -14,7 +15,7 @@ from shared.infra.redis import ping_redis
 from schemas import UserData
 from config import get_worker_settings
 from .agent_factory import build_agent 
-from .session import create_agent_session
+from .session import create_agent_session, _warm_llm
 from .event_handlers import register_event_handlers
 from .prompt_cache import create_prompt_cache
 from utils import lookup_customer, build_user_context_block, build_instruction
@@ -115,9 +116,20 @@ async def entrypoint(ctx: JobContext) -> None:
             ),
         )
 
-        # build agent with system instruction and chat context
-        agent = build_agent(user_data, system_instructions, chat_ctx=chat_ctx)
+        # create llm client for agent task since the current supervisor agent llm does not include the task tools
+        task_llm = livekit_google_plugin.LLM(
+            model=settings.GEMINI_MODEL,
+            temperature=settings.GEMINI_TEMPERATURE,
+            max_output_tokens=settings.GEMINI_TOKEN_LIMIT,
+            thinking_config={"thinking_budget": settings.GEMINI_THINKING_BUDGET},
+            vertexai=settings.VERTEXAI,
+            project=settings.PROJECT,
+            location=settings.LOCATION,
+        )
 
+        # build agent with system instruction and chat context
+        agent = build_agent(user_data, system_instructions, chat_ctx=chat_ctx, task_llm = task_llm)
+    
         # create cached_content    
         cached_content = await asyncio.to_thread(
             create_prompt_cache,
@@ -125,6 +137,9 @@ async def entrypoint(ctx: JobContext) -> None:
             system_instructions,
             agent.tools,
         )
+
+        # warming task llm 
+        _warm_llm(user_data=user_data, llm=task_llm)
         
         # create agent session with userdata and cached content
         session = await create_agent_session(user_data, cached_content=cached_content)
