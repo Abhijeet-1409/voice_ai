@@ -1,4 +1,4 @@
-from livekit.agents.llm import FunctionTool
+from livekit.agents.llm import FunctionTool, LLM
 from livekit.agents import Agent, ChatContext, function_tool, RunContext
 
 from shared.config import Track
@@ -13,29 +13,51 @@ logger = get_logger(_LOGGER)
 
 
 class Assistant(Agent):
-    """
-    Thin container holding this call's instructions and free-function
-    tool list (assembled by agent_factory.build_agent). Carries exactly
-    one bound method of its own, schedule_meeting — it has to be bound
-    (not a free function in domain/tools/) because it needs
-    self.chat_ctx to hand conversation history into the Tasks it
-    triggers, which a free function taking only ctx: RunContext can't
-    access.
+    """Assistant agent for managing interaction flows and meeting scheduling.
+
+    A container holding session-specific configurations, dynamic execution
+    instructions, and tool sets assembled by `agent_factory.build_agent`.
+    Maintains `schedule_meeting` as a bound method to allow sub-tasks to access
+    conversation history (`self.chat_ctx`).
+
+    Attributes:
+        name (str): Display name of the assistant.
+        company_name (str): Name of the organization represented by the assistant.
+        user_data (UserData | None): User metadata for the current session.
+        task_llm (LLM | None): Specialized LLM instance dedicated to sub-task
+            executions.
     """
 
     def __init__(
-            self, 
-            name: str, 
-            company_name: str, 
-            instructions: str, 
-            tools: list[FunctionTool], 
-            user_data: UserData | None = None,
-            chat_ctx: ChatContext | None = None
-        ) -> None:
+        self, 
+        name: str, 
+        company_name: str, 
+        instructions: str, 
+        tools: list[FunctionTool], 
+        user_data: UserData | None = None,
+        chat_ctx: ChatContext | None = None,
+        task_llm: LLM | None = None
+    ) -> None:
+        """Initializes an Assistant agent instance.
+
+        Args:
+            name (str): Display name of the assistant.
+            company_name (str): Name of the company/organization.
+            instructions (str): System prompt instructions driving assistant behavior.
+            tools (list[FunctionTool]): Collection of free-function tools available to
+                the agent.
+            user_data (UserData | None, optional): User metadata and contextual information.
+                Defaults to None.
+            chat_ctx (ChatContext | None, optional): Initial chat history/context object.
+                Defaults to None.
+            task_llm (LLM | None, optional): LLM instance reserved for nested sub-tasks.
+                Defaults to None.
+        """
         logger.info("Initializing Assistant agent")
         self.name = name
         self.company_name = company_name
         self.user_data = user_data
+        self.task_llm = task_llm
         
         super().__init__(
             instructions=instructions,
@@ -45,16 +67,21 @@ class Assistant(Agent):
 
     @function_tool()
     async def schedule_meeting(self, ctx: RunContext, track: Track) -> str:
-        """
-        Use this when the user wants to schedule a meeting. Confirms
-        their email (reading back whatever's already known, or
-        collecting it fresh if not), then walks them through picking
-        and booking an available time slot.
+        """Schedules a meeting by verifying email and booking an available slot.
+
+        Executes two sequential sub-tasks: confirming/collecting the user's email
+        address and selecting/booking an available meeting time slot for the specified
+        offering track.
 
         Args:
-            ctx (RunContext): The LiveKit agent execution context.
-            track: Which offering track the meeting is for, based on
-                what the user has told you.
+            ctx (RunContext): LiveKit agent execution context containing session state
+                and userdata.
+            track (Track): The product or service offering track for the meeting based
+                on user input.
+
+        Returns:
+            str: A natural-language status message indicating either successful booking
+                details or instructions to follow up via email if booking failed.
         """
         logger.info("Starting schedule_meeting with track: %s", track)
 
@@ -62,6 +89,7 @@ class Assistant(Agent):
         confirmed_email = await ConfirmEmailTask(
             candidate_email=ctx.userdata.email,
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
+            task_llm=self.task_llm,
         )
         ctx.userdata.email = confirmed_email
         logger.info("Email confirmed: %s", confirmed_email)
@@ -71,6 +99,7 @@ class Assistant(Agent):
             contact_email=confirmed_email,
             track=track,
             chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
+            task_llm=self.task_llm 
         )
 
         if booked_slot:
