@@ -1,13 +1,14 @@
 import asyncio
 from typing import Optional
 
-from livekit.agents import AgentTask, RunContext, ToolError, function_tool
+from livekit.agents import AgentTask, RunContext, ToolError, function_tool, ChatContext
+from livekit.agents.llm import LLM
 
 from shared.config import Track
 from shared.logging_setup import get_logger
 
 from utils import get_slots, confirm_booking
-
+from domain import CHOOSE_SLOT_TASK_PROMPT
 
 _LOGGER = "worker.tasks.choose_slot_task"
 logger = get_logger(_LOGGER)
@@ -17,60 +18,63 @@ _BOOKING_TIMEOUT_SECONDS = 10
 
 
 class ChooseSlotTask(AgentTask[Optional[str]]):
-    """Helps the user pick a meeting slot and books it on confirmation.
+    """Task that guides the user through selecting and confirming a meeting slot.
 
-    Fetches available slots via `get_slots` on enter, walks the user
-    through picking one, requires explicit confirmation before booking,
-    and books via `confirm_booking`. Fails soft for a normal decline (no
-    slots available, or the calendar client reports booking failed): the
-    task completes `None` and the caller is expected to offer a
-    follow-up instead of treating it as an error. A genuine timeout
-    (the booking call hung) is treated as unexpected and raises
-    ToolError instead — distinct from a normal decline.
+    Retrieves available slots upon entering the task, communicates options to
+    the user, enforces mandatory explicit confirmation, and attempts booking
+    via `confirm_booking`.
 
-    Result:
-        The booked slot string on success, `None` if no slots were
-        available or booking was declined by the calendar client.
+    Handles failures gracefully: returns `None` if no slots are available or if
+    the booking call is rejected by the underlying calendar client. Raises a
+    `ToolError` on timeout (hanging network requests), treating it as an execution
+    failure rather than a standard decline.
+
+    Attributes:
+        contact_email (str): Confirmed email address where the invite will be sent.
+        track (Optional[Track]): Offering track passed down to the calendar client.
+        available_slots (list[str]): List of retrieved open slot strings.
+        task_llm (Optional[LLM]): LLM instance dedicated to this task workflow.
     """
 
     def __init__(
         self,
         contact_email: str,
         track: Optional[Track] = None,
-        chat_ctx=None,
-    ):
-        """
+        chat_ctx: Optional[ChatContext] = None,
+        task_llm: Optional[LLM] = None
+    ) -> None:
+        """Initializes a new ChooseSlotTask instance.
+
         Args:
-            contact_email: Previously confirmed email to send the invite to.
-            track: Optional track context, passed through to the calendar client.
+            contact_email (str): Previously confirmed email address to receive
+                the meeting invitation.
+            track (Optional[Track]): Product or service offering track context.
+                Defaults to None.
+            chat_ctx (Optional[ChatContext]): Pre-existing chat history context.
+                Defaults to None.
+            task_llm (Optional[LLM]): Specialized LLM instance to execute this task.
+                Defaults to None.
         """
         self.contact_email = contact_email
         self.track = track
         self.available_slots: list[str] = []
+        self.task_llm = task_llm
 
         logger.info("Initializing ChooseSlotTask for email: %s, track: %s", contact_email, track)
 
         super().__init__(
-            instructions="""
-            Help the user pick a meeting time from the available slots
-            you'll be given shortly.
-
-            Read out the available slots in natural, conversational
-            language. Ask which one works for them.
-
-            Once they pick one, read it back clearly and ask them to
-            confirm it's the one they want. Only call `submit_slot` after
-            they have explicitly confirmed. If they change their mind,
-            help them pick again.
-
-            Only offer slots from the list you were given. If the user
-            asks for a time that isn't in the list, let them know it's
-            not available and offer the closest options instead.
-            """,
+            instructions=CHOOSE_SLOT_TASK_PROMPT,
             chat_ctx=chat_ctx,
+            task_llm=task_llm
         )
 
     async def on_enter(self) -> None:
+        """Lifecycle hook executed when entering the task workflow.
+
+        Fetches available meeting slots and presents them to the user. If no
+        slots are available, generates an apology reply and completes the task
+        with `None`.
+        """
         logger.info("Entering ChooseSlotTask, fetching available slots...")
         self.available_slots = await get_slots(track=self.track)
 
@@ -90,24 +94,30 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
         slots_text = "\n".join(f"- {s}" for s in self.available_slots)
         await self.session.generate_reply(
             instructions=f"""
-            Let the user know you'll help them find a meeting time.
-            Available slots:
-            {slots_text}
-            Read these out naturally and ask which works best.
+            Tell the caller briefly that you can help them choose a meeting time.
+            Available slots: {slots_text}
+            Read the available options naturally and ask which one works best.
             """
         )
 
     @function_tool
     async def submit_slot(self, ctx: RunContext, slot: str, read_back: bool) -> str:
-        """Submit and book the chosen slot.
+        """Submits and books the user's selected meeting slot.
+
+        Validates slot availability and ensures user confirmation before
+        disabling interrupts and submitting the booking request to the calendar.
 
         Args:
-            ctx (RunContext): The LiveKit agent execution context.
-            slot: The selected slot, exactly as given in the available
-                slots list.
-            read_back: Set to True only after you have read the chosen
-                slot back to the user in natural language and they have
-                explicitly confirmed it's the one they want.
+            ctx (RunContext): LiveKit execution context for managing call state.
+            slot (str): Selected slot, matching an entry from `available_slots`.
+            read_back (bool): Must be `True` to confirm that the slot was read back
+                to the user and explicitly acknowledged before calling this tool.
+
+        Returns:
+            str: A natural-language status or error message directing the LLM's next response.
+
+        Raises:
+            ToolError: If the calendar booking request times out.
         """
         logger.info("submit_slot called with slot: '%s', read_back: %s", slot, read_back)
 
