@@ -66,12 +66,44 @@ class Assistant(Agent):
         )
 
     @function_tool()
-    async def schedule_meeting(self, ctx: RunContext, track: Track) -> str:
-        """Schedules a meeting by verifying email and booking an available slot.
+    async def get_contact_info(self, ctx: RunContext) -> str:
+        """Collects and confirms the contact information required for scheduling.
 
-        Executes two sequential sub-tasks: confirming/collecting the user's email
-        address and selecting/booking an available meeting time slot for the specified
-        offering track.
+        This tool handles the contact-information step separately from meeting
+        scheduling. It confirms the caller's existing email when available or
+        collects a new email address when it is not available.
+
+        Args:
+            ctx (RunContext): LiveKit agent execution context containing session state
+                and userdata.
+
+        Returns:
+            str: A status message indicating that the caller's email was confirmed
+                and is ready to be used for scheduling.
+        """
+        logger.info("Starting get_contact_info")
+
+        logger.info("Executing ConfirmEmailTask")
+        confirmed_email = await ConfirmEmailTask(
+            candidate_email=ctx.userdata.email,
+            chat_ctx=self.chat_ctx.copy(
+                exclude_function_call=True,
+                exclude_instructions=True,
+            ),
+            task_llm=self.task_llm,
+        )
+
+        ctx.userdata.email = confirmed_email
+        logger.info("Email confirmed: %s", confirmed_email)
+
+        return f"Contact information confirmed for {confirmed_email}."
+
+    @function_tool()
+    async def schedule_meeting(self, ctx: RunContext, track: Track) -> str:
+        """Schedules a meeting by selecting and booking an available time slot.
+
+        This tool assumes the caller's contact information has already been
+        collected and confirmed by get_contact_info.
 
         Args:
             ctx (RunContext): LiveKit agent execution context containing session state
@@ -85,28 +117,29 @@ class Assistant(Agent):
         """
         logger.info("Starting schedule_meeting with track: %s", track)
 
-        logger.info("Executing ConfirmEmailTask")
-        confirmed_email = await ConfirmEmailTask(
-            candidate_email=ctx.userdata.email,
-            chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
-            task_llm=self.task_llm,
-        )
-        ctx.userdata.email = confirmed_email
-        logger.info("Email confirmed: %s", confirmed_email)
+        contact_email = ctx.userdata.email
+        if not contact_email:
+            logger.warning(
+                "schedule_meeting called before contact information was collected"
+            )
+            return "Contact information must be collected and confirmed before scheduling the meeting."
 
-        logger.info("Executing ChooseSlotTask for %s", confirmed_email)
+        logger.info("Executing ChooseSlotTask for %s", contact_email)
         booked_slot = await ChooseSlotTask(
-            contact_email=confirmed_email,
+            contact_email=contact_email,
             track=track,
-            chat_ctx=self.chat_ctx.copy(exclude_instructions=True),
-            task_llm=self.task_llm 
+            chat_ctx=self.chat_ctx.copy(
+                exclude_function_call=True, 
+                exclude_instructions=True, 
+            ),
+            task_llm=self.task_llm,
         )
 
         if booked_slot:
             logger.info("Meeting successfully booked for slot: %s", booked_slot)
             ctx.userdata.meeting_scheduled = True
             ctx.userdata.meeting_slot = booked_slot
-            return f"Meeting scheduled for {booked_slot} and confirmed. Will send email to {confirmed_email} with the invite."
+            return f"Meeting scheduled for {booked_slot} and confirmed. Will send email to {contact_email} with the invite."
         else:
-            logger.warning("Could not book a meeting slot for %s", confirmed_email)
-            return f"Could not book a meeting. Follow up with {confirmed_email} by email instead."
+            logger.warning("Could not book a meeting slot for %s", contact_email)
+            return f"Could not book a meeting. Follow up with {contact_email} by email instead."
