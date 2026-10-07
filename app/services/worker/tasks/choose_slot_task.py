@@ -65,7 +65,7 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
         super().__init__(
             instructions=CHOOSE_SLOT_TASK_PROMPT,
             chat_ctx=chat_ctx,
-            task_llm=task_llm
+            llm=task_llm
         )
 
     async def on_enter(self) -> None:
