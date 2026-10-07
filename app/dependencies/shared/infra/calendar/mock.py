@@ -32,9 +32,9 @@ def _generate_dummy_slots(now: Optional[datetime] = None) -> list[str]:
     for day_offset, hour, minute in _SLOT_OFFSETS:
         slot_dt = base.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=day_offset)
         if day_offset == 1:
-            label = f"Tomorrow {slot_dt.strftime('%-I:%M %p')} IST"
+            label = f"Tomorrow ({slot_dt.strftime('%d %b %Y')}) {slot_dt.strftime('%-I:%M %p')} IST"
         else:
-            label = f"{slot_dt.strftime('%A')} {slot_dt.strftime('%-I:%M %p')} IST"
+            label = f"{slot_dt.strftime('%A')} ({slot_dt.strftime('%d %b %Y')}) {slot_dt.strftime('%-I:%M %p')} IST"
         slots.append(label)
     return slots
 
