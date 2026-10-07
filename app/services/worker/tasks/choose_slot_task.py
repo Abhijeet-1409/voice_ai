@@ -6,13 +6,15 @@ from livekit.agents.llm import LLM
 
 from shared.config import Track
 from shared.logging_setup import get_logger
-from shared.infra.calendar import MeetingSlot
+from shared.infra.calendar.mock import MeetingSlot
 
 from utils import get_slots, confirm_booking
 from domain import CHOOSE_SLOT_TASK_PROMPT
 
+
 _LOGGER = "worker.tasks.choose_slot_task"
 logger = get_logger(_LOGGER)
+
 
 _BOOKING_TIMEOUT_SECONDS = 10
 
