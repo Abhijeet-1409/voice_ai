@@ -1,7 +1,8 @@
 import asyncio
 from typing import Optional
+from textwrap import dedent
 
-from livekit.agents import AgentTask, RunContext, ToolError, function_tool, ChatContext
+from livekit.agents import AgentTask, ChatContext, RunContext, ToolError, function_tool
 from livekit.agents.llm import LLM
 
 from shared.config import Track
@@ -9,32 +10,20 @@ from shared.logging_setup import get_logger
 from shared.infra.calendar.mock import MeetingSlot
 
 from utils import get_slots, confirm_booking
-from domain import CHOOSE_SLOT_TASK_PROMPT
+from utils import build_choose_slot_task_prompt
 
 
 _LOGGER = "worker.tasks.choose_slot_task"
 logger = get_logger(_LOGGER)
 
-
 _BOOKING_TIMEOUT_SECONDS = 10
 
 
 class ChooseSlotTask(AgentTask[Optional[str]]):
-    """Task that guides the user through selecting and confirming a meeting slot.
+    """Task for selecting, confirming, and booking one meeting slot.
 
-    Retrieves available slots upon entering the task, communicates options to
-    the user, enforces mandatory explicit confirmation, and attempts booking
-    via `confirm_booking`.
-
-    Handles failures gracefully: returns `None` if no slots are available or if
-    the booking call is rejected by the underlying calendar client. Raises a
-    `ToolError` on timeout.
-
-    Attributes:
-        contact_email: Confirmed email address where the invite will be sent.
-        track: Offering track passed down to the calendar client.
-        available_slots: List of retrieved MeetingSlot objects.
-        task_llm: LLM instance dedicated to this task workflow.
+    The actual available slots are runtime state. They are fetched in
+    ``on_enter()`` and added to the task's ChatContext as a system message.
     """
 
     def __init__(
@@ -43,20 +32,36 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
         track: Optional[Track] = None,
         chat_ctx: Optional[ChatContext] = None,
         task_llm: Optional[LLM] = None,
+        *,
+        supervisor_name: str,
+        supervisor_role: str,
+        invocation_reason: str,
+        known_context: str,
+        expected_result: str,
+        already_completed: str,
+        previous_step: str,
+        current_step: str,
+        next_step: str,
+        meeting_slot_description: str,
     ) -> None:
-        """Initializes a new ChooseSlotTask instance.
-
-        Args:
-            contact_email: Previously confirmed email address to receive
-                the meeting invitation.
-            track: Product or service offering track context.
-            chat_ctx: Pre-existing chat history context.
-            task_llm: Specialized LLM instance to execute this task.
-        """
         self.contact_email = contact_email
         self.track = track
         self.available_slots: list[MeetingSlot] = []
         self.task_llm = task_llm
+        self._booking_completed = False
+
+        instructions = build_choose_slot_task_prompt(
+            supervisor_name=supervisor_name,
+            supervisor_role=supervisor_role,
+            invocation_reason=invocation_reason,
+            known_context=known_context,
+            expected_result=expected_result,
+            already_completed=already_completed,
+            previous_step=previous_step,
+            current_step=current_step,
+            next_step=next_step,
+            meeting_slot_description=meeting_slot_description,
+        )
 
         logger.info(
             "Initializing ChooseSlotTask for email: %s, track: %s",
@@ -65,13 +70,13 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
         )
 
         super().__init__(
-            instructions=CHOOSE_SLOT_TASK_PROMPT,
+            instructions=instructions,
             chat_ctx=chat_ctx,
             llm=task_llm,
         )
 
     async def on_enter(self) -> None:
-        """Fetch and present available meeting slots."""
+        """Fetch current slots, persist them in context, and present them."""
         logger.info("Entering ChooseSlotTask, fetching available slots...")
 
         self.available_slots = await get_slots(track=self.track)
@@ -83,10 +88,11 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
             )
 
             await self.session.generate_reply(
-                instructions="""
-                Apologize that there are no available meeting slots right
-                now, and let the user know you'll follow up by email instead.
-                """
+                instructions=(
+                    "Tell the caller briefly that there are no available "
+                    "meeting slots right now and that you will follow up "
+                    "by email instead."
+                )
             )
 
             self.complete(None)
@@ -99,24 +105,42 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
         )
 
         slots_text = "\n".join(
-            f"- ID: {slot.id} | Time: {slot.value}"
+            f"- ID: {slot.id} | Value: {slot.value}"
             for slot in self.available_slots
         )
 
+        self.chat_ctx.add_message(
+            role="system",
+            content=dedent(
+                f"""
+                # CURRENT AVAILABLE MEETING SLOTS
+
+                The following slots were retrieved from the calendar for this task:
+
+                {slots_text}
+
+                These slots are authoritative runtime data.
+
+                Rules:
+                - Offer only these slots.
+                - Preserve each ID-to-value mapping exactly.
+                - The caller should hear the human-readable value.
+                - `submit_slot` must receive the exact corresponding ID.
+                - Never invent, modify, or reinterpret a slot.
+                - If the caller requests a time not present here, explain that it is
+                unavailable and offer the actual available slots.
+                """
+            ).strip(),
+        )
+
+        await self.update_chat_ctx(self.chat_ctx)
+
         await self.session.generate_reply(
-            instructions=f"""
-            Tell the caller briefly that you can help them choose a meeting time.
-
-            Available slots:
-            {slots_text}
-
-            Read the available times naturally to the caller and ask which
-            one works best.
-
-            When calling submit_slot, use the exact slot ID associated with
-            the time the caller selected. Never pass the human-readable time
-            as the slot argument.
-            """
+            instructions=(
+                "Briefly tell the caller that you can help them choose a "
+                "meeting time. Present all currently available times naturally "
+                "and ask which one works best."
+            )
         )
 
     @function_tool
@@ -126,33 +150,22 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
         slot_id: str,
         read_back: bool,
     ) -> str:
-        """Submits and books the user's selected meeting slot.
-
-        Args:
-            ctx: LiveKit execution context for managing call state.
-            slot_id: ID of the selected slot from the available slots.
-            read_back: Must be True to confirm that the slot was read back
-                to the user and explicitly acknowledged before booking.
-
-        Returns:
-            Natural-language status or error message directing the LLM's
-            next response.
-
-        Raises:
-            ToolError: If the calendar booking request times out.
-        """
+        """Book the selected meeting slot after explicit confirmation."""
         logger.info(
             "submit_slot called with slot_id: '%s', read_back: %s",
             slot_id,
             read_back,
         )
 
+        if self._booking_completed:
+            logger.warning("submit_slot called after task completion")
+            return (
+                "This meeting-slot task has already been completed. "
+                "Return the result to the supervisor."
+            )
+
         selected_slot = next(
-            (
-                slot
-                for slot in self.available_slots
-                if slot.id == slot_id
-            ),
+            (slot for slot in self.available_slots if slot.id == slot_id),
             None,
         )
 
@@ -175,14 +188,13 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
 
         if not read_back:
             logger.warning(
-                "submit_slot invoked without user confirmation "
-                "(read_back=False)"
+                "submit_slot invoked without explicit confirmation"
             )
 
             return (
                 f"Read the chosen slot back to the user as "
                 f"'{selected_slot.value}' and get explicit confirmation "
-                f"before calling this tool again."
+                "before calling this tool again."
             )
 
         ctx.disallow_interruptions()
@@ -222,12 +234,12 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
 
         if not booked:
             logger.warning(
-                "Booking failed on calendar client for slot_id='%s', "
-                "slot='%s'",
+                "Booking failed for slot_id='%s', slot='%s'",
                 selected_slot.id,
                 selected_slot.value,
             )
 
+            self._booking_completed = True
             self.complete(None)
 
             return (
@@ -242,6 +254,7 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
             self.contact_email,
         )
 
+        self._booking_completed = True
         self.complete(selected_slot.value)
 
         return f"Slot booked: {selected_slot.value}"
