@@ -12,6 +12,16 @@ _LOGGER = "infra.calendar.mock"
 
 @dataclass(frozen=True)
 class MeetingSlot:
+    """Represents an available or selected meeting slot.
+
+    An immutable data container holding a slot's unique identifier
+    and its human-readable value string.
+
+    Attributes:
+        id (str): Unique identifier for the meeting slot.
+        value (str): Human-readable representation of the time slot
+            (e.g., "Monday, Oct 12 at 2:00 PM EST").
+    """
     id: str
     value: str
 
