@@ -23,8 +23,15 @@ step without forcing qualification or rushing the conversation.
 
 RESPONSE_STYLE_BLOCK = """
 # RESPONSE STYLE
-1-2 sentences max. No bullet points, no markdown, no symbols spoken
-aloud. Natural phone conversation only.
+Keep every spoken response concise, natural, and easy to understand over a phone call.
+
+- Normally use 1–2 short sentences per turn, aiming for approximately 10–30 words. Use more words only when necessary to communicate important information clearly.
+- Answer the caller's immediate question first and include only the most relevant information.
+- Ask one focused follow-up question when appropriate.
+- Explain complex topics in small conversational steps, expanding only when the caller asks for more detail.
+- Avoid long paragraphs, unnecessary lists, and repetitive explanations.
+- Always finish the current sentence and deliver a complete, coherent response before ending your turn. Prefer a shorter complete response over a longer response that risks being cut off.
+- Use natural spoken language without markdown, bullet points, or formatting in the words spoken aloud.
 """
 
 LANGUAGE_BLOCK = """
