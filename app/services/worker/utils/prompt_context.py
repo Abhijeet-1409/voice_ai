@@ -3,7 +3,16 @@ from shared.logging_setup import get_logger
 
 from schemas import UserData
 from config import get_worker_settings
-from domain import OUTREACH_SYSTEM_PROMPT, INBOUND_SYSTEM_PROMPT, DEFAULT_SYSTEM_PROMPT
+from domain import (
+        OUTREACH_SYSTEM_PROMPT, 
+        INBOUND_SYSTEM_PROMPT, 
+        DEFAULT_SYSTEM_PROMPT,
+        TASK_IDENTITY_TEMPLATE,
+        SUPERVISOR_CONTEXT_TEMPLATE,
+        WORKFLOW_POSITION_TEMPLATE,
+        CONFIRM_EMAIL_TASK_PROMPT,
+        CHOOSE_SLOT_TASK_PROMPT
+    )
 
 
 _LOGGER = "worker.utils.prompt_context"
@@ -74,4 +83,129 @@ def build_user_context_block(userdata: UserData) -> str:
         f"Track: {userdata.track or 'Not yet determined'}\n"
         f"Previously qualified: {'Yes' if userdata.qualified else 'No'}\n"
         f"Lifecycle stage: {userdata.lifecyclestage}"
+    )
+
+
+def build_task_identity(
+    *,
+    task_name: str,
+    supervisor_name: str,
+) -> str:
+    """Build the identity section for a bounded AgentTask."""
+    return TASK_IDENTITY_TEMPLATE.format(
+        task_name=task_name,
+        supervisor_name=supervisor_name,
+    )
+
+
+def build_supervisor_context(
+    *,
+    supervisor_name: str,
+    supervisor_role: str,
+    invocation_reason: str,
+    known_context: str,
+    expected_result: str,
+    already_completed: str,
+) -> str:
+    """Build the Supervisor context section for a bounded AgentTask."""
+    return SUPERVISOR_CONTEXT_TEMPLATE.format(
+        supervisor_name=supervisor_name,
+        supervisor_role=supervisor_role,
+        invocation_reason=invocation_reason,
+        known_context=known_context,
+        expected_result=expected_result,
+        already_completed=already_completed,
+    )
+
+
+def build_workflow_position(
+    *,
+    previous_step: str,
+    current_step: str,
+    next_step: str,
+) -> str:
+    """Build the workflow-position section for a bounded AgentTask."""
+    return WORKFLOW_POSITION_TEMPLATE.format(
+        previous_step=previous_step,
+        current_step=current_step,
+        next_step=next_step,
+    )
+
+
+def build_confirm_email_task_prompt(
+    *,
+    supervisor_name: str,
+    supervisor_role: str,
+    invocation_reason: str,
+    known_context: str,
+    expected_result: str,
+    already_completed: str,
+    previous_step: str,
+    current_step: str,
+    next_step: str,
+) -> str:
+    """Render the complete ConfirmEmailTask prompt."""
+    return (
+        build_task_identity(
+            task_name="ConfirmEmailTask",
+            supervisor_name=supervisor_name,
+        )
+        + build_supervisor_context(
+            supervisor_name=supervisor_name,
+            supervisor_role=supervisor_role,
+            invocation_reason=invocation_reason,
+            known_context=known_context,
+            expected_result=expected_result,
+            already_completed=already_completed,
+        )
+        + build_workflow_position(
+            previous_step=previous_step,
+            current_step=current_step,
+            next_step=next_step,
+        )
+        + CONFIRM_EMAIL_TASK_PROMPT
+    )
+
+
+def build_choose_slot_task_prompt(
+    *,
+    supervisor_name: str,
+    supervisor_role: str,
+    invocation_reason: str,
+    known_context: str,
+    expected_result: str,
+    already_completed: str,
+    previous_step: str,
+    current_step: str,
+    next_step: str,
+    meeting_slot_description: str,
+) -> str:
+    """
+    Render the complete ChooseSlotTask prompt.
+
+    The actual available meeting slots are intentionally NOT injected here.
+    They are runtime state and should be fetched and injected by
+    ChooseSlotTask.on_enter().
+    """
+    return (
+        build_task_identity(
+            task_name="ChooseSlotTask",
+            supervisor_name=supervisor_name,
+        )
+        + build_supervisor_context(
+            supervisor_name=supervisor_name,
+            supervisor_role=supervisor_role,
+            invocation_reason=invocation_reason,
+            known_context=known_context,
+            expected_result=expected_result,
+            already_completed=already_completed,
+        )
+        + build_workflow_position(
+            previous_step=previous_step,
+            current_step=current_step,
+            next_step=next_step,
+        )
+        + CHOOSE_SLOT_TASK_PROMPT.format(
+            meeting_slot_description=meeting_slot_description,
+        )
     )
