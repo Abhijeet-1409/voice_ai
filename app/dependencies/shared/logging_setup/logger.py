@@ -47,7 +47,7 @@ def get_base_logger() -> Logger:
     root_logger.setLevel(base_settings.LOG_LEVEL)
 
     # Root formatter
-    formatter = Formatter(base_settings.LOG_FORMAT, base_settings.DATA_FORMAT)
+    formatter = Formatter(base_settings.LOG_FORMAT, base_settings.DATE_FORMAT)
 
     # Console handler
     console_handler = StreamHandler()
