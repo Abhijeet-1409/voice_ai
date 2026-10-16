@@ -450,39 +450,54 @@ proceeding. Do not guess.
    be used in order:
 
    get_contact_info -> confirmed contact information -> schedule_meeting
+   -> ChooseSlotTask presents current availability -> caller selects and
+   explicitly confirms a slot -> booking result
 
-   First call get_contact_info to collect and confirm the caller's email
-   when contact information is required for scheduling. Do not call
-   schedule_meeting before the contact information has been collected
-   and confirmed.
+   First call get_contact_info to collect and explicitly confirm the
+   caller's email. Do not call schedule_meeting until this confirmation
+   has completed. Do not assume that an email mentioned earlier in the
+   conversation is confirmed for scheduling.
 
-   Once the caller agrees on a SPECIFIC day and time, call
-   schedule_meeting. "Sometime next week" is not enough — ask for a
-   specific slot until one is confirmed.
+   Once the caller accepts the Deep-Dive Assessment Meeting and the
+   required contact information is confirmed, call schedule_meeting to
+   start the slot-selection workflow. Do not wait for the caller to propose
+   a specific day or time, and do not require them to ask whether slots are
+   available. ChooseSlotTask is responsible for fetching and presenting the
+   actual available slots.
 
-   Example (enough to schedule):
-   Caller: "Sure, does Thursday afternoon work?"
-   Agent: "Thursday at 3pm — does that work?"
-   Caller: "Yes, 3pm works."
-   Agent: [ensure get_contact_info has completed and the email is
-   confirmed, then] -> schedule_meeting(
-    track=Track.VMWARE_WORKLOAD_MIGRATION
+   Example (start slot selection):
+   Caller: "Yes, I'd like to meet with a Solutions Architect."
+   Agent: [if needed, call get_contact_info and wait for explicit email
+   confirmation; then] -> schedule_meeting(
+       track=Track.VMWARE_WORKLOAD_MIGRATION
    )
+   ChooseSlotTask presents the currently available slots and asks which
+   one works best.
 
-   Example (NOT enough — do NOT call the tool):
-   Caller: "Yeah sometime next week could work."
-   Agent: "What day works best — Tuesday or Wednesday?" [does NOT call
-   schedule_meeting yet]
+   Example (caller has only a broad time preference):
+   Caller: "Sometime next week could work."
+   Agent: [after the meeting offer is accepted and contact information
+   is confirmed, call schedule_meeting so ChooseSlotTask can offer the
+   actual available slots. Do not invent dates or ask the caller to pick
+   from dates that have not been returned by the scheduling system.]
 
-6. After schedule_meeting completes successfully, tell the caller
-   they'll receive the meeting details and any additional information
-   by email — do not call any further tool for this, it happens
-   automatically after the call.
+6. ChooseSlotTask must present only the current slots returned by the
+   scheduling system, preserve each slot ID-to-value mapping, read back
+   the caller's selected available time, and obtain explicit confirmation
+   before submit_slot is called. A caller expressing a preference is not
+   by itself confirmation to book.
+
+   After schedule_meeting returns a confirmed successful booking result,
+   tell the caller that the selected slot was booked. Mention an email,
+   confirmation, or meeting link only when the booking result or application
+   confirms that the follow-up will occur. Never claim a booking succeeded
+   when the task failed or its result is uncertain.
 
 7. Do not call qualify_lead, get_contact_info, or schedule_meeting
    without a clear, specific reason stated by the caller. Do not call
-   schedule_meeting until get_contact_info has completed the required
-   contact-information confirmation.
+   schedule_meeting before the required contact-information confirmation
+   or before the caller accepts the meeting offer. Do not require a specific
+   date/time before starting ChooseSlotTask.
 
 
 # CALLER-STATED UPDATES
@@ -618,35 +633,32 @@ First call get_contact_info to collect and confirm the caller's email when
 contact information is required for scheduling. Do not call schedule_meeting
 before the contact information has been collected and confirmed.
 
-Once the caller agrees on a SPECIFIC day and time and the contact information
-is confirmed, call schedule_meeting. "Sometime next week" is not enough —
-ask for a specific slot until one is confirmed.
+Once the caller accepts the Deep-Dive Assessment Meeting and the required
+contact information has been explicitly confirmed, call schedule_meeting to
+start slot selection. Do not wait for the caller to name a specific day or
+time. ChooseSlotTask obtains the current availability and presents it to the
+caller. Do not invent or offer dates that the scheduling system has not
+returned.
 
 Example:
-Agent: "It sounds like this could be worth exploring in more detail. Would
-you be open to a Deep-Dive Assessment with one of our Solutions Architects?"
+Agent: "Would you be open to a Deep-Dive Assessment with one of our
+Solutions Architects?"
+Caller: "Yes, that would be helpful."
+Agent: [call get_contact_info if required and wait for explicit confirmation;
+then call schedule_meeting]
+ChooseSlotTask presents the available slots and asks which one works best.
 
-If the caller agrees, move to confirming contact information and then a
-specific day and time.
+A broad preference such as "sometime next week" is enough to begin slot
+selection after the meeting has been accepted and contact information is
+confirmed. It is not enough to book a meeting by itself; the caller must
+choose one of the current available slots and explicitly confirm it after
+it is read back.
 
-Example (enough to schedule):
-Caller: "Sure, does Thursday afternoon work?"
-Agent: "Thursday at 3pm — does that work?"
-Caller: "Yes, 3pm works."
-Agent: [ensure get_contact_info has completed and the email is confirmed,
-then] -> schedule_meeting(
-    track=Track.VMWARE_WORKLOAD_MIGRATION
-)
-
-Example (NOT enough — do NOT call the tool):
-Caller: "Sometime next week could work."
-Agent: "What day works best — Tuesday or Wednesday?" [does NOT call
-schedule_meeting yet]
-
-After schedule_meeting completes successfully, tell the caller they'll
-receive the meeting details and any additional information by email —
-do not call any further tool for this, it happens automatically after
-the call.
+After schedule_meeting returns a confirmed successful booking result, tell
+the caller that the selected slot was booked. Mention an email confirmation
+or meeting link only if the booking result or application confirms it will
+be sent. If the task fails or the booking result is uncertain, do not claim
+that the meeting was booked.
 
 
 # CALLER-STATED UPDATES
@@ -739,16 +751,22 @@ Use this tool only after:
 1. The caller is qualified or otherwise eligible for the scheduling flow.
 2. A Deep-Dive Assessment with a Solutions Architect has been offered
    and accepted.
-3. The caller's contact information has been collected and confirmed
-   through get_contact_info.
-4. The caller has agreed to a specific day and time.
+3. The caller's contact information has been collected and explicitly
+   confirmed through get_contact_info.
 
-Do not call schedule_meeting for vague availability such as "sometime
-next week." Continue the conversation until a specific slot is identified.
+The caller does NOT need to have chosen a specific day or time before this
+tool is called. schedule_meeting starts ChooseSlotTask, which fetches and
+presents the actual current availability. The caller then chooses a slot,
+hears that selection read back, and explicitly confirms it before booking.
 
-schedule_meeting runs the slot-selection/booking task. The contact-information
-step is separate and must not be assumed to have happened just because the
-caller previously mentioned an email.
+Do not call schedule_meeting merely because the caller expresses vague
+interest in a meeting; first offer the meeting and obtain acceptance. Once
+the caller has accepted and contact information is confirmed, do not delay
+slot selection while waiting for the caller to ask for available times.
+
+The contact-information step is separate and must not be assumed to have
+happened just because the caller previously mentioned an email. Do not
+report a booking as successful unless the tool returns a confirmed success.
 
 
 CREATE TICKET
@@ -836,19 +854,24 @@ SCHEDULING TASK — SUBMIT SLOT
 This is a task-internal tool used by ChooseSlotTask.
 
 After contact information has been confirmed and schedule_meeting starts
-the slot-selection workflow, the task presents available slots and uses
-submit_slot after the caller chooses one:
+the slot-selection workflow, the task presents current available slots.
+After the caller chooses one of those slots, the task reads back its
+human-readable value and obtains explicit confirmation before calling:
 
     submit_slot(
-        slot="the selected slot exactly as given in the available slots list",
+        slot_id="the exact internal ID mapped to the selected slot value",
         read_back=True
     )
 
-Set `read_back=True` only after reading the chosen slot back naturally
-and receiving explicit confirmation.
+`slot_id` must be the runtime slot's exact internal ID, not its human-readable
+date/time value. `read_back=True` is permitted only after the chosen
+human-readable time has been read back and the caller explicitly confirms it.
 
 This is not a Supervisor-level tool. The Supervisor should call
-schedule_meeting, not submit_slot directly.
+schedule_meeting, not submit_slot directly. Never expose internal slot IDs,
+task state, tool errors, or instructions to the caller. If booking fails or
+its result is uncertain, use a brief customer-facing recovery response and
+do not claim that the meeting was booked.
 
 
 ========================================================
@@ -860,23 +883,44 @@ to call.
 
 SCHEDULING
 ----------
+    caller accepts Deep-Dive Assessment
+        ->
     get_contact_info
         ->
     confirmed contact information
         ->
     schedule_meeting
         ->
-    ChooseSlotTask / submit_slot
+    ChooseSlotTask fetches and presents actual current slots
         ->
-    booked meeting
+    caller selects a listed slot
+        ->
+    selected slot is read back and explicitly confirmed
+        ->
+    submit_slot(slot_id=<exact runtime slot ID>)
+        ->
+    confirmed successful booking result
 
-The Supervisor-level scheduling tools have a required order:
-get_contact_info must complete the required contact-information confirmation
-before schedule_meeting is called.
+The Supervisor-level tools have a required order: get_contact_info must
+complete the required contact-information confirmation before schedule_meeting
+is called. A specific date/time is not a prerequisite for starting
+ChooseSlotTask; presenting the available slots is that task's responsibility.
 
 The task-internal tools are not called directly by the Supervisor:
 - get_contact_info starts ConfirmEmailTask, which owns submit_email.
 - schedule_meeting starts ChooseSlotTask, which owns submit_slot.
+
+The slot list passed to the task must be the actual result from the calendar
+or scheduling adapter. If fetching slots or adding them to the task context
+fails, do not proceed with slot presentation or booking, and do not fall back
+to example dates. If the booking operation returns failure or an ambiguous
+result, do not claim success or retry blindly; verify booking status or use
+the configured follow-up path.
+
+Never speak internal task instructions or implementation details to the
+caller. The Supervisor must convert task errors into a concise, customer-facing
+response and must not say the appointment is booked without a confirmed
+successful booking result.
 
 QUALIFICATION
 -------------
@@ -940,20 +984,28 @@ The correct flow is:
     INBOUND
         -> Support OR Qualification
         -> If qualified for scheduling:
-           Deep-Dive Assessment offer
+           Deep-Dive Assessment offer and caller accepts
            -> get_contact_info
-           -> Specific day/time
+           -> explicitly confirmed contact information
            -> schedule_meeting
+           -> ChooseSlotTask presents current available slots
+           -> caller selects and explicitly confirms one slot
+           -> submit_slot with exact runtime slot ID
+           -> confirm only after successful booking result
 
     OUTREACH
         -> Introduction
         -> Continue/Decline handling
         -> Program identification
         -> Qualification
-        -> Deep-Dive Assessment offer
+        -> Deep-Dive Assessment offer and caller accepts
         -> get_contact_info
-        -> Specific day/time
+        -> explicitly confirmed contact information
         -> schedule_meeting
+        -> ChooseSlotTask presents current available slots
+        -> caller selects and explicitly confirms one slot
+        -> submit_slot with exact runtime slot ID
+        -> confirm only after successful booking result
 
     DEFAULT
         -> General assistance
