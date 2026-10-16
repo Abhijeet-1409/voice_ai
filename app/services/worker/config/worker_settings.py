@@ -17,6 +17,8 @@ class WorkerSettings(AppBaseSettings):
     # ── Agent ────────────────────────────────────────────────────────────────────
     AGENT_NAME: str
     COMPANY_NAME: str = "Writer Information"
+    SYSTEM_INSTRUCTION_VERSION: int = 1
+    VOICE_AGENT_GUIDE_VERSION: int = 1
 
     # ── LLM ────────────────────────────────────────────────────────────────────
     GEMINI_API_KEY_1: str
@@ -32,9 +34,12 @@ class WorkerSettings(AppBaseSettings):
     LOCATION: str | None
     VERTEXAI: bool | None = False
     CACHED_CONTENT_TTL: int = 600
+    GOOGLE_TTS_MODEL: str = "gemini-2.5-flash-tts"
+    VOICE_NAME: str = "en-IN-Chirp3-HD-Achernar"
 
     # ── Cartesia ───────────────────────────────────────────────────────────────
     CARTESIA_API_KEY: str
+    CARTESIA_API_KEY_TTS: str
     CARTESIA_VOICE_ID: str
     CARTESIA_STT_MODEL: str = "ink-whisper"
     CARTESIA_TTS_MODEL: str = "sonic-3.5"
