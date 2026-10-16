@@ -1,6 +1,6 @@
 from functools import cache
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class AppBaseSettings(BaseSettings):
@@ -29,12 +29,10 @@ class AppBaseSettings(BaseSettings):
     # Logging — both containers need these
     LOG_LEVEL: str = "DEBUG"
     LOG_FILE: str | None = None
-    DATA_FORMAT: str ="%Y-%m-%d %H:%M:%S"
+    DATE_FORMAT: str ="%Y-%m-%d %H:%M:%S"
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
 @cache
