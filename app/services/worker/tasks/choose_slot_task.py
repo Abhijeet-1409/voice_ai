@@ -23,7 +23,8 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
     """Task for selecting, confirming, and booking one meeting slot.
 
     The actual available slots are runtime state. They are fetched in
-    ``on_enter()`` and added to the task's ChatContext as a system message.
+    ``on_enter()``, added to a writable copy of the task's ChatContext, and
+    persisted with ``update_chat_ctx()`` before the task presents any slots.
     """
 
     def __init__(
@@ -49,6 +50,9 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
         self.available_slots: list[MeetingSlot] = []
         self.task_llm = task_llm
         self._booking_completed = False
+        # True only after runtime slots have been fetched and injected into
+        # the active task context. A failed injection must never permit booking.
+        self._slots_context_ready = False
 
         instructions = build_choose_slot_task_prompt(
             supervisor_name=supervisor_name,
@@ -76,25 +80,31 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
         )
 
     async def on_enter(self) -> None:
-        """Fetch current slots, persist them in context, and present them."""
+        """Fetch slots, inject authoritative runtime data, then present them."""
         logger.info("Entering ChooseSlotTask, fetching available slots...")
 
-        self.available_slots = await get_slots(track=self.track)
+        # A retrieval failure is a task failure, not permission to continue with
+        # example dates from the static prompt.
+        try:
+            self.available_slots = await get_slots(track=self.track)
+        except Exception:
+            logger.exception(
+                "Failed to retrieve available slots for track=%s",
+                self.track,
+            )
+            self.available_slots = []
+            self._slots_context_ready = False
+            self.complete(None)
+            return
 
         if not self.available_slots:
             logger.warning(
                 "No available slots found for track: %s",
                 self.track,
             )
-
-            await self.session.generate_reply(
-                instructions=(
-                    "Tell the caller briefly that there are no available "
-                    "meeting slots right now and that you will follow up "
-                    "by email instead."
-                )
-            )
-
+            self._slots_context_ready = False
+            # Let the Supervisor handle the customer-facing fallback. Returning
+            # None means no slot was selected or booked.
             self.complete(None)
             return
 
@@ -109,38 +119,64 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
             for slot in self.available_slots
         )
 
-        self.chat_ctx.add_message(
-            role="system",
-            content=dedent(
-                f"""
-                # CURRENT AVAILABLE MEETING SLOTS
+        slot_context = dedent(
+            f"""
+            # CURRENT AVAILABLE MEETING SLOTS
 
-                The following slots were retrieved from the calendar for this task:
+            The following slots were retrieved from the calendar for this task.
+            This list is authoritative runtime data, not an example:
 
-                {slots_text}
+            {slots_text}
 
-                These slots are authoritative runtime data.
+            Rules:
+            - Offer only these slots.
+            - Preserve each ID-to-value mapping exactly.
+            - Say the human-readable value to the caller; do not say internal IDs.
+            - `submit_slot` must receive the exact ID matching the selected value.
+            - Never use dates or times from examples as current availability.
+            - Never invent, modify, or reinterpret a slot.
+            - If the caller requests a time not in this list, say it is unavailable
+              and offer the actual slots above.
+            """
+        ).strip()
 
-                Rules:
-                - Offer only these slots.
-                - Preserve each ID-to-value mapping exactly.
-                - The caller should hear the human-readable value.
-                - `submit_slot` must receive the exact corresponding ID.
-                - Never invent, modify, or reinterpret a slot.
-                - If the caller requests a time not present here, explain that it is
-                unavailable and offer the actual available slots.
-                """
-            ).strip(),
+        # `self.chat_ctx` is a read-only view in LiveKit Agents. Copy it before
+        # mutation, then persist the updated context through the supported API.
+        try:
+            task_ctx = self.chat_ctx.copy()
+            task_ctx.add_message(
+                role="system",
+                content=slot_context,
+            )
+            await self.update_chat_ctx(task_ctx)
+        except Exception:
+            logger.exception(
+                "Failed to inject runtime slot data into task chat context; "
+                "refusing to continue with potentially stale prompt examples"
+            )
+            self.available_slots = []
+            self._slots_context_ready = False
+            self.complete(None)
+            return
+
+        self._slots_context_ready = True
+        logger.info(
+            "Runtime slot context injected successfully; slot_ids=%s",
+            [slot.id for slot in self.available_slots],
         )
 
-        await self.update_chat_ctx(self.chat_ctx)
-
-        await self.session.generate_reply(
+        # AgentTask documentation advises not awaiting generate_reply() from
+        # on_enter(). Pass the copied context explicitly for this first reply,
+        # while update_chat_ctx() above persists it for subsequent turns.
+        self.session.generate_reply(
             instructions=(
-                "Briefly tell the caller that you can help them choose a "
-                "meeting time. Present all currently available times naturally "
-                "and ask which one works best."
-            )
+                "Present all currently available meeting times from the "
+                "authoritative runtime slot list in the chat context. Ask which "
+                "one the caller prefers. Do not mention internal IDs, use example "
+                "dates, or claim any slot has been booked."
+            ),
+            chat_ctx=task_ctx,
+            tool_choice="none",
         )
 
     @function_tool
@@ -157,11 +193,20 @@ class ChooseSlotTask(AgentTask[Optional[str]]):
             read_back,
         )
 
+        if not self._slots_context_ready:
+            logger.error(
+                "Rejected submit_slot because runtime slot context is not ready"
+            )
+            return (
+                "I couldn't verify the current available times, so I haven't "
+                "booked anything. I'll need to check availability and follow up."
+            )
+
         if self._booking_completed:
             logger.warning("submit_slot called after task completion")
             return (
-                "This meeting-slot task has already been completed. "
-                "Return the result to the supervisor."
+                "I couldn't confirm a new booking. I'll check the status of "
+                "your request before giving you a confirmation."
             )
 
         selected_slot = next(
