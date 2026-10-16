@@ -153,12 +153,21 @@ async def create_agent_session(user_data: UserData, cached_content: Optional[str
     )
 
     tts = cartesia.TTS(
-        api_key=settings.CARTESIA_API_KEY,
+        api_key=settings.CARTESIA_API_KEY_TTS,
         voice=settings.CARTESIA_VOICE_ID,
         model=settings.CARTESIA_TTS_MODEL,
         language=settings.CARTESIA_TTS_LANGUAGE
     )
 
+    # google_tts = livekit_google_plugin.TTS(
+    #     model_name=settings.GOOGLE_TTS_MODEL,
+    #     voice_name=settings.VOICE_NAME,
+    #     language="en-IN",
+    #     use_streaming=True,
+    #     sample_rate=24000,
+    #     location=settings.LOCATION,  
+    # )
+    
     await warm_up_pipeline(user_data, llm, tts)
 
     session = AgentSession[UserData](

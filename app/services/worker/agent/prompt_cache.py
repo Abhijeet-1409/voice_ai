@@ -22,6 +22,7 @@ logger = get_logger(_LOGGER)
 def create_prompt_cache(
     user_data: UserData,
     system_instruction: str,
+    voice_agent_guide: str,
     agent_tools: Sequence[Tool | Toolset],
 ) -> Optional[str]:
     """
@@ -41,8 +42,12 @@ def create_prompt_cache(
             agent's identity, personality, conversational behavior,
             language behavior, and general guardrails.
 
+        voice_agent_guide (str):
+            The voice agent guide containing business and conversation guidance.
+        
         agent_tools (Sequence[Tool | Toolset]):
             The LiveKit tools or toolsets available to the agent.
+
 
     Returns:
         Optional[str]:
@@ -69,17 +74,6 @@ def create_prompt_cache(
             ],
         )
 
-        enum_reference = describe_all(
-            Track,
-            TicketPriority,
-            TicketStatus,
-        )
-
-        voice_agent_guide = VOICE_AGENT_GUIDE.format(
-            company_name=settings.COMPANY_NAME,
-            enum_reference=enum_reference,
-        )
-
         guide_contents = [
             types.Content(
                 role="user",
@@ -95,8 +89,15 @@ def create_prompt_cache(
             )
         ]
 
+        system_instruction_content_tokens: types.CountTokensResponse = (
+            client.models.count_tokens(    
+                model=settings.GEMINI_MODEL,
+                contents=system_instruction_content,
+            )
+        )
+
         # Count the exact guide content being cached
-        total_tokens: types.CountTokensResponse = (
+        guide_content_tokens: types.CountTokensResponse = (
             client.models.count_tokens(
                 model=settings.GEMINI_MODEL,
                 contents=guide_contents,
@@ -104,8 +105,10 @@ def create_prompt_cache(
         )
 
         logger.info(
+            f"System instruction token count:"
+            f"{system_instruction_content_tokens.total_tokens}\n"
             f"Cached guide content token count: "
-            f"{total_tokens.total_tokens}"
+            f"{guide_content_tokens.total_tokens}"
         )
 
         # Convert LiveKit tools to Gemini tools
