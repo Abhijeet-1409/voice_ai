@@ -4,6 +4,7 @@ from .meeting_scheduler import get_slots, confirm_booking
 from .prompt_context import (
         build_user_context_block, 
         build_instruction, 
+        build_voice_agent_guide,
         build_choose_slot_task_prompt, 
         build_confirm_email_task_prompt
     )
@@ -19,6 +20,7 @@ __all__ = [
     "confirm_booking",
     "build_user_context_block",
     "build_instruction",
+    "build_voice_agent_guide",
     "build_choose_slot_task_prompt",
     "build_confirm_email_task_prompt"
 ]
