@@ -89,6 +89,19 @@ class CallType(StrEnum):
     INBOUND = "inbound"
     OUTREACH = "outreach"
 
+class PromptCacheType(StrEnum):
+    """
+    Types of prompt caches used for storing and retrieving session-specific prompts.
+
+    Attributes:
+        INBOUND_PROMPT_CACHE (str): Cache type for inbound prompt data.
+        OUTBOUND_PROMPT_CACHE (str): Cache type for outbound prompt data.
+        DEFAULT_PROMPT_CACHE (str): Cache type for default prompt data.
+    """
+    INBOUND_PROMPT_CACHE = "inbound_prompt_cache"
+    OUTBOUND_PROMPT_CACHE = "outbound_prompt_cache"
+    DEFAULT_PROMPT_CACHE = "default_prompt_cache"
+
 CUSTOMER_CACHE_TTL = 900          # 15 minutes in seconds
 CALL_SESSION_TTL = 21600          # 6 hours — safety TTL for Redis transcript
 GEMINI_KEY_COOLDOWN_SECONDS = 3600  # 1 hour — cooldown period for API key
