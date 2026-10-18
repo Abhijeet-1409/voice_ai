@@ -1,110 +1,183 @@
-import redis.asyncio as redis
+import redis as sync_redis
+import redis.asyncio as async_redis
 from redis.exceptions import RedisError
 
-from shared.logging_setup import get_logger
 from shared.config import get_app_settings, AppBaseSettings
+from shared.logging_setup import get_logger
 
 
 _LOGGER = "infra.redis.client"
 
 
-# Private singleton instance of the asynchronous Redis client.
-# Lazy-loaded to ensure it is only created when first needed, preventing 
-# socket corruption when processes fork (e.g., during worker pre-warming).
-_redis_client: redis.Redis | None = None
+# Module-level singleton for the synchronous Redis client.
+# Initialized lazily to avoid creating connections until the client is needed.
+_sync_redis_client: sync_redis.Redis | None = None
+
+# Module-level singleton for the asynchronous Redis client.
+# Initialized lazily to avoid creating connections until the client is needed.
+_async_redis_client: async_redis.Redis | None = None
 
 
 class RedisNotInitializedError(RuntimeError):
-    """
-    Exception raised for errors in the Redis initialization lifecycle.
+    """Raised when a Redis client lifecycle operation requires prior initialization."""
 
-    This is triggered when a teardown operation is attempted before the 
-    asynchronous Redis client has been initialized.
-    """
-    def __init__(self, message="Redis client has not been initialized. Call get_redis_client() first."):
-        self.message = message
-        super().__init__(self.message)
+    def __init__(
+        self,
+        message: str = "Redis client has not been initialized.",
+    ) -> None:
+        super().__init__(message)
 
 
-def get_redis_client() -> redis.Redis:
-    """
-    Retrieves or creates a lazy-loaded Redis asynchronous client.
+def get_sync_redis_client() -> sync_redis.Redis:
+    """Return the lazily initialized synchronous Redis client.
 
-    The client is configured from the application settings with production-ready
-    defaults, including connection pooling, automatic string decoding, and
-    network timeout handling. Once created, it is cached globally.
+    The client uses application settings and a connection pool. Repeated calls
+    return the same client instance.
 
     Returns:
-        redis.Redis: The configured asynchronous Redis client instance.
+        The configured synchronous Redis client.
     """
-    global _redis_client
+    global _sync_redis_client
 
-    if _redis_client:
-        return _redis_client
+    if _sync_redis_client is not None:
+        return _sync_redis_client
 
     settings: AppBaseSettings = get_app_settings()
 
-    redis_client = redis.from_url(
+    # Creating the client configures its connection pool; it does not
+    # necessarily establish a network connection immediately.
+    client = sync_redis.from_url(
         settings.REDIS_URL,
-        decode_responses=True,       # Return strings instead of bytes
-        health_check_interval=30,    # Keep idle connections alive
-        socket_timeout=3.0,          # Don't hang forever on network stalls
-        retry_on_timeout=True,       # Recover from brief network blips
-        max_connections=50           # Cap the connection pool
+        decode_responses=True,       # Decode Redis responses as strings.
+        health_check_interval=30,    # Check connection health after idle periods.
+        socket_timeout=3.0,          # Limit individual socket operations.
+        retry_on_timeout=True,       # Enable retries for timeout errors.
+        max_connections=50,          # Maximum connections in the pool.
     )
 
-    _redis_client = redis_client
+    _sync_redis_client = client
+    return client
 
-    return redis_client
 
-
-async def ping_redis() -> bool:
-    """
-    Verifies the Redis server is reachable and operational on startup.
-
-    Executes a ping command against the lazy-loaded Redis client to ensure
-    the connection pool is functioning correctly. Logs the success or failure
-    of the connection attempt.
+def ping_redis_sync() -> bool:
+    """Check whether the synchronous Redis server responds to PING.
 
     Returns:
-        bool: True if the Redis server responds successfully, False otherwise.
+        True if the ping succeeds; otherwise, False.
     """
-    # Simply call the getter to ensure it's initialized before testing
-    redis_client = get_redis_client()
+    client = get_sync_redis_client()
     logger = get_logger(_LOGGER)
 
     try:
-        await redis_client.ping()
-        logger.debug("Successfully pinged Redis server.")
+        client.ping()
+        logger.debug("Successfully pinged synchronous Redis server.")
         return True
-    except RedisError as e:
-        logger.error(f"Failed to ping Redis server: {e}")
+    except RedisError as err:
+        logger.error(f"Failed to ping synchronous Redis server: {err}")
         return False
 
 
-async def close_redis():
-    """
-    Safely disposes of the Redis connection pool during application shutdown.
+def close_redis_sync() -> None:
+    """Close the synchronous Redis client during application shutdown.
 
-    This ensures all active connections are gracefully disconnected and returned
-    to the OS, preventing socket leaks. It also resets the module-level 
-    singleton (`_redis_client`) to allow safe re-initialization if needed.
+    Resets the module-level singleton after closing so that it can be
+    initialized again if required.
 
     Raises:
-        RedisNotInitializedError: If called before the Redis client has been initialized.
+        RedisNotInitializedError: If the client has not been initialized.
+        Exception: Re-raises an unexpected error encountered during cleanup.
     """
-    global _redis_client
+    global _sync_redis_client
 
-    if _redis_client is None:
-        raise RedisNotInitializedError("Redis client must be initialized before closing.")
+    if _sync_redis_client is None:
+        raise RedisNotInitializedError(
+            "Synchronous Redis client must be initialized before closing."
+        )
 
     logger = get_logger(_LOGGER)
 
     try:
-        # Note: Use .aclose() for redis-py version 5.0+.
-        # For older versions, use: await redis_client.close()
-        await _redis_client.aclose()
-        _redis_client = None
-        logger.info("Redis connection pool closed successfully.")
-    except Exception as e:
-        logger.error(f"Error closing Redis connection pool: {e}")
+        _sync_redis_client.close()
+        _sync_redis_client = None
+        logger.info("Synchronous Redis client closed successfully.")
+    except Exception as err:
+        logger.exception(f"Error closing synchronous Redis client: {err}")
+        raise
+
+
+def get_async_redis_client() -> async_redis.Redis:
+    """Return the lazily initialized asynchronous Redis client.
+
+    Use this client in async application code to avoid blocking the event loop
+    while performing Redis operations. Repeated calls return the same client
+    instance.
+
+    Returns:
+        The configured asynchronous Redis client.
+    """
+    global _async_redis_client
+
+    if _async_redis_client is not None:
+        return _async_redis_client
+
+    settings: AppBaseSettings = get_app_settings()
+
+    # The async client manages asynchronous connections through its own pool.
+    # Actual network communication occurs when an operation is awaited.
+    client = async_redis.from_url(
+        settings.REDIS_URL,
+        decode_responses=True,       # Decode Redis responses as strings.
+        health_check_interval=30,    # Check connection health after idle periods.
+        socket_timeout=3.0,          # Limit individual socket operations.
+        retry_on_timeout=True,       # Enable retries for timeout errors.
+        max_connections=50,          # Maximum connections in the pool.
+    )
+
+    _async_redis_client = client
+    return client
+
+
+async def ping_redis_async() -> bool:
+    """Check asynchronously whether the Redis server responds to PING.
+
+    Returns:
+        True if the ping succeeds; otherwise, False.
+    """
+    client = get_async_redis_client()
+    logger = get_logger(_LOGGER)
+
+    try:
+        await client.ping()
+        logger.debug("Successfully pinged asynchronous Redis server.")
+        return True
+    except RedisError as err:
+        logger.error(f"Failed to ping asynchronous Redis server: {err}")
+        return False
+
+
+async def close_redis_async() -> None:
+    """Close the asynchronous Redis client during application shutdown.
+
+    Resets the module-level singleton after closing so that it can be
+    initialized again if required.
+
+    Raises:
+        RedisNotInitializedError: If the client has not been initialized.
+        Exception: Re-raises an unexpected error encountered during cleanup.
+    """
+    global _async_redis_client
+
+    if _async_redis_client is None:
+        raise RedisNotInitializedError(
+            "Asynchronous Redis client must be initialized before closing."
+        )
+
+    logger = get_logger(_LOGGER)
+
+    try:
+        await _async_redis_client.aclose()
+        _async_redis_client = None
+        logger.info("Asynchronous Redis client closed successfully.")
+    except Exception as err:
+        logger.exception(f"Error closing asynchronous Redis client: {err}")
+        raise
