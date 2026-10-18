@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, Integer
+from sqlalchemy import String, DateTime, Integer, select, Result
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,7 +42,7 @@ class PromptCache(Base):
     created_at:                 Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at:                 Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
-def sync_save_prompt_cache(
+def save_prompt_cache_sync(
     prompt_type: PromptCacheType,
     vertex_cache_name: str,
     model: str,
@@ -74,26 +74,61 @@ def sync_save_prompt_cache(
             session.commit()
 
         logger.info(
-            "Saved prompt cache metadata | "
-            "cache_id=%s | prompt_type=%s | model=%s",
-            new_cache.id,
-            prompt_type,
-            model,
+            f"Saved prompt cache metadata | "
+            f"cache_id={new_cache.id} | prompt_type={prompt_type} | model={model}"
         )
 
     except SQLAlchemyError:
         logger.exception(
-            "Failed to save prompt cache metadata | "
-            "prompt_type=%s | model=%s",
-            prompt_type,
-            model,
+            f"Failed to save prompt cache metadata | "
+            f"prompt_type={prompt_type} | model={model}"
         )
         raise
 
     return new_cache
 
 
-async def async_save_prompt_cache(
+def get_prompt_cache_sync(
+    prompt_type: PromptCacheType,
+    model: str,
+    location: str,
+    system_instruction_version: int,
+    voice_agent_guide_version: int,
+) -> PromptCache | None:
+    """Retrieve the newest prompt cache record matching the supplied configuration."""
+
+    logger = get_logger(_LOGGER)
+    session_factory = get_sync_sessionmaker()
+
+    try:
+        with session_factory() as session:
+            stmt = (
+                select(PromptCache)
+                .where(
+                    PromptCache.prompt_type == prompt_type,
+                    PromptCache.model == model,
+                    PromptCache.location == location,
+                    PromptCache.system_instruction_version
+                    == system_instruction_version,
+                    PromptCache.voice_agent_guide_version
+                    == voice_agent_guide_version,
+                )
+                .order_by(PromptCache.expires_at.desc())
+                .limit(1)
+            )
+            result: Result[PromptCache] = session.execute(stmt)
+            cache = result.scalars().first()
+            logger.debug(f"Retrieved matching prompt cache metadata: {cache}")
+            return cache
+
+    except SQLAlchemyError:
+        logger.exception(
+            f"Failed to retrieve prompt cache metadata | "
+            f"prompt_type={prompt_type} | model={model} | location={location}"
+        )
+        raise
+
+async def save_prompt_cache_async(
     prompt_type: PromptCacheType,
     vertex_cache_name: str,
     model: str,
@@ -125,20 +160,56 @@ async def async_save_prompt_cache(
             await session.commit()
 
         logger.info(
-            "Saved prompt cache metadata | "
-            "cache_id=%s | prompt_type=%s | model=%s",
-            new_cache.id,
-            prompt_type,
-            model,
+            f"Saved prompt cache metadata | "
+            f"cache_id={new_cache.id} | prompt_type={prompt_type} | model={model}"
         )
 
     except SQLAlchemyError:
         logger.exception(
-            "Failed to save prompt cache metadata | "
-            "prompt_type=%s | model=%s",
-            prompt_type,
-            model,
+            f"Failed to save prompt cache metadata | "
+            f"prompt_type={prompt_type} | model={model}"
         )
         raise
 
     return new_cache
+
+
+async def get_prompt_cache_async(
+    prompt_type: PromptCacheType,
+    model: str,
+    location: str,
+    system_instruction_version: int,
+    voice_agent_guide_version: int,
+) -> PromptCache | None:
+    """Asynchronously retrieve the newest matching prompt cache record."""
+
+    logger = get_logger(_LOGGER)
+    session_factory = get_async_sessionmaker()
+
+    try:
+        async with session_factory() as session:
+            stmt = (
+                select(PromptCache)
+                .where(
+                    PromptCache.prompt_type == prompt_type,
+                    PromptCache.model == model,
+                    PromptCache.location == location,
+                    PromptCache.system_instruction_version
+                    == system_instruction_version,
+                    PromptCache.voice_agent_guide_version
+                    == voice_agent_guide_version,
+                )
+                .order_by(PromptCache.expires_at.desc())
+                .limit(1)
+            )
+            result = await session.execute(stmt)
+            cache = result.scalars().first()
+            logger.debug(f"Retrieved matching prompt cache metadata: {cache}")
+            return cache
+
+    except SQLAlchemyError:
+        logger.exception(
+            f"Failed to retrieve prompt cache metadata | "
+            f"prompt_type={prompt_type} | model={model} | location={location}"
+        )
+        raise
