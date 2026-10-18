@@ -1,9 +1,9 @@
-from .base import BaseVectorStore, VectorStoreError
-from .pg_store import PgVectorStore, get_pgvectorstore
+from .base import BaseVectorStore
+from . import exceptions
+from . import adapters
 
 __all__ = [
     "BaseVectorStore",
-    "VectorStoreError",
-    "PgVectorStore",
-    "get_pgvectorstore"
+    "exceptions",
+    "adapters"
 ]

@@ -1,5 +1,3 @@
-from functools import cache
-
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -7,10 +5,11 @@ from shared.logging_setup import get_logger
 from shared.infra.postgres import KnowledgeChunk
 from shared.infra.postgres.database import get_async_sessionmaker
 
-from .base import BaseVectorStore, VectorStoreError
+from ...base import BaseVectorStore
+from ...exceptions import VectorStoreError
 
 
-_LOGGER = "infra.vector_store.pg_store"
+_LOGGER = "infra.vector_store.adapters.pg_store.implementation"
 
 
 class PgVectorStore(BaseVectorStore):
