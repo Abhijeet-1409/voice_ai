@@ -2,7 +2,8 @@ from typing import Optional
 
 from shared.logging_setup import get_logger
 from shared.config import LifecycleStage
-from shared.infra.crm import get_mockcrmclient, ContactAlreadyExistsError, CRMClientError, ContactNotFoundError
+from shared.infra.crm.adapters.mock import get_mockcrmclient
+from shared.infra.crm.exceptions import ContactAlreadyExistsError, CRMClientError, ContactNotFoundError
 
 from schemas import UserData
 
@@ -15,17 +16,17 @@ async def lookup_customer(phone_number: str) -> Optional[dict]:
     """
     Queries the CRM to find an existing contact associated with the provided phone number.
 
-    Deliberately non-raising: this function is designed to be safe for pre-call 
-    routing or mid-call lookups. If the CRM is unreachable or throws an error, 
-    it logs the failure and gracefully returns None. This ensures the voice agent 
-    can still proceed with the conversation (treating the caller as a new or 
+    Deliberately non-raising: this function is designed to be safe for pre-call
+    routing or mid-call lookups. If the CRM is unreachable or throws an error,
+    it logs the failure and gracefully returns None. This ensures the voice agent
+    can still proceed with the conversation (treating the caller as a new or
     unidentified lead) rather than crashing the active call.
 
     Args:
         phone_number (str): The user's phone number to search for in the CRM.
 
     Returns:
-        Optional[dict]: A dictionary containing the contact's CRM fields if found. 
+        Optional[dict]: A dictionary containing the contact's CRM fields if found.
             Returns None if the contact does not exist or if the CRM request fails.
     """
     crm_client = get_mockcrmclient()
@@ -35,11 +36,11 @@ async def lookup_customer(phone_number: str) -> Optional[dict]:
 
         if existing is None:
             logger.debug(f"No existing contact found for phone_number={phone_number}")
-            return None 
+            return None
 
         logger.info(f"Existing contact retrieved successfully | phone_number={phone_number} | id={existing['id']}")
         return existing
-        
+
     except CRMClientError as crm_err:
         logger.error(f"CRM operation failed during customer lookup | phone_number={phone_number} | error={crm_err}")
         return None
@@ -80,10 +81,10 @@ async def create_customer(userdata: UserData) -> None:
         logger.warning(
             f"Conflict: Contact already exists | phone={userdata.phone} | Re-fetching to bind ID | error={exist_err}"
         )
-        
+
         # Reuse lookup_customer which handles its own errors and safely returns None on failure
         existing = await lookup_customer(userdata.phone)
-        
+
         if existing is not None:
             userdata.customer_id = existing["id"]
             logger.info(f"Successfully bound existing contact ID post-call | phone={userdata.phone} | id={existing['id']}")
@@ -104,17 +105,17 @@ async def update_customer(userdata: UserData) -> None:
     end. Counterpart to create_customer — used when
     userdata.customer_id is already set (contact was found earlier in
     the call via lookup_customer), rather than newly created.
- 
+
     Deliberately non-raising, same reasoning as create_customer: runs
     post-call (event_handlers.py's on_close), where an exception could
     interfere with cleanup/shutdown logic.
- 
+
     Relies on MockCRMClient.update_contact's own regression guards
     (qualified only ever advances False->True, lifecyclestage only ever
     moves forward per LIFECYCLE_STAGE_ORDER) — this function does not
     duplicate that logic, it just passes through whatever this call's
     userdata currently holds.
- 
+
     Args:
         userdata: The call's UserData. userdata.customer_id must already
             be set — this function does nothing if it's None.
@@ -122,9 +123,9 @@ async def update_customer(userdata: UserData) -> None:
     if userdata.customer_id is None:
         logger.debug("update_customer called with no customer_id set — nothing to update.")
         return
- 
+
     crm_client = get_mockcrmclient()
- 
+
     try:
         await crm_client.update_contact(
             userdata.customer_id,
@@ -137,14 +138,14 @@ async def update_customer(userdata: UserData) -> None:
             },
         )
         logger.info(f"Updated contact at call end — id={userdata.customer_id}")
- 
+
     except ContactNotFoundError as err:
         # Contact was deleted/removed between this call resolving it and
         # call end — nothing more we can do without raising.
         logger.error(
             f"update_customer: contact not found — id={userdata.customer_id} error={err}"
         )
- 
+
     except CRMClientError as err:
         logger.error(
             f"Failed to update contact at call end — id={userdata.customer_id} error={err}"
