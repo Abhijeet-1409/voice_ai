@@ -11,14 +11,14 @@ from livekit.agents import ChatContext, room_io, AutoSubscribe, JobContext
 from shared.call_context import stream_sid_var
 from shared.logging_setup import get_logger
 from shared.config import CallType, Channel
-from shared.infra.postgres import db_init
-from shared.infra.redis import ping_redis
+from shared.infra.postgres import init_db_async
+from shared.infra.redis import ping_redis_async
 from shared.config import Track, TicketPriority, TicketStatus
 
 from schemas import UserData
 from utils import describe_all
 from config import get_worker_settings
-from .agent_factory import build_agent 
+from .agent_factory import build_agent
 from .session import create_agent_session, _warm_llm
 from .event_handlers import register_event_handlers
 from .prompt_cache import create_prompt_cache
@@ -33,7 +33,7 @@ async def entrypoint(ctx: JobContext) -> None:
     """
     Primary execution entrypoint for a LiveKit agent job (per-call).
 
-    This function is triggered every time a new call routes to this worker. 
+    This function is triggered every time a new call routes to this worker.
     It is responsible for bootstrapping the call lifecycle, which includes:
     1. Initializing network-bound singletons (Database, Redis) post-fork.
     2. Extracting call metadata and looking up the caller's profile.
@@ -43,18 +43,18 @@ async def entrypoint(ctx: JobContext) -> None:
     6. Starting the active voice session with noise cancellation.
 
     Args:
-        ctx (JobContext): The context for the current LiveKit job, providing 
+        ctx (JobContext): The context for the current LiveKit job, providing
                           access to the room, connections, and metadata.
-                          
+
     Raises:
-        Exception: If call bootstrapping fails, the error is logged and re-raised 
+        Exception: If call bootstrapping fails, the error is logged and re-raised
                    to let the framework cleanly terminate the job.
     """
     try:
         settings = get_worker_settings()
 
-        await db_init()  # ensure the database engine is initialized before any DB operations
-        await ping_redis()  # ensure Redis is reachable
+        await init_db_async()  # ensure the database engine is initialized before any DB operations
+        await ping_redis_async()  # ensure Redis is reachable
 
         # connect to the room first — metadata isn't reliably readable
         # until the room connection is established
@@ -117,13 +117,13 @@ async def entrypoint(ctx: JobContext) -> None:
                 email=metadata.get("email"),
             )
 
-        # create user context block 
+        # create user context block
         user_context_block = build_user_context_block(user_data)
 
-        # create system instruction 
+        # create system instruction
         system_instructions = build_instruction(user_data, version=settings.SYSTEM_INSTRUCTION_VERSION)
 
-        # create voice guide content n 
+        # create voice guide content n
         enum_reference = describe_all(
             Track,
             TicketPriority,
@@ -160,8 +160,8 @@ async def entrypoint(ctx: JobContext) -> None:
 
         # build agent with system instruction and chat context
         agent = build_agent(user_data, combined_system_instruction, chat_ctx=chat_ctx, task_llm = task_llm)
-    
-        # create cached_content    
+
+        # create cached_content
         cached_content = await asyncio.to_thread(
             create_prompt_cache,
             user_data,
@@ -170,15 +170,15 @@ async def entrypoint(ctx: JobContext) -> None:
             agent.tools,
         )
 
-        # warming task llm 
+        # warming task llm
         await _warm_llm(user_data=user_data, llm=task_llm)
-        
+
         # create agent session with userdata and cached content
         session = await create_agent_session(user_data, cached_content=cached_content)
-        
-        # setting is_realtime_model flag on user_data 
-        user_data.is_realtime_model = isinstance(session.llm, RealtimeModel) 
-        
+
+        # setting is_realtime_model flag on user_data
+        user_data.is_realtime_model = isinstance(session.llm, RealtimeModel)
+
         # register event handlers
         register_event_handlers(session=session,stream_sid=stream_sid,user_data=user_data)
 
@@ -198,7 +198,7 @@ async def entrypoint(ctx: JobContext) -> None:
             # audio_output=room_io.AudioOutputOptions(
             #     # output_language=output_language,
             # ),
-            
+
         )
 
     except Exception as e:
