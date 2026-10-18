@@ -2,11 +2,9 @@ from typing import Any, Optional, Sequence
 
 from shared.logging_setup import get_logger
 from shared.config import Track
-from shared.infra.calendar import (
-    get_mockcalendarclient,
-    CalendarClientError,
-)
-from shared.infra.calendar.mock import MeetingSlot
+from shared.infra.calendar import MeetingSlot
+from shared.infra.calendar.adapters.mock import get_mockcalendarclient
+from shared.infra.calendar.exceptions import CalendarClientError
 
 
 _LOGGER = "worker.utils.meeting_scheduler"
