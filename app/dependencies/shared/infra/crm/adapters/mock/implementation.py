@@ -1,4 +1,3 @@
-from functools import cache
 from typing import Optional
 
 from pydantic import BaseModel
@@ -11,10 +10,11 @@ from shared.logging_setup import get_logger
 from shared.config import TicketPriority, LifecycleStage, TicketStatus, Track, LIFECYCLE_STAGE_ORDER
 from shared.infra.postgres import Contact, Ticket
 from shared.infra.postgres.database import get_async_sessionmaker
-from .base import BaseCRMClient, CRMClientError, ContactNotFoundError, ContactAlreadyExistsError
+from ...base import BaseCRMClient
+from ...exceptions import CRMClientError, ContactNotFoundError, ContactAlreadyExistsError
 
 
-_LOGGER = "infra.crm.mock"
+_LOGGER = "infra.crm.adapters.mock.implementation"
 
 
 class ContactUpdateSchema(BaseModel):
@@ -71,11 +71,11 @@ class MockCRMClient(BaseCRMClient):
             self.logger.error(f"Database error while fetching contact by phone {phone_number}: {sql_err}")
             raise CRMClientError("Failed to fetch contact due to a database error.") from sql_err
 
-    async def create_contact(self, 
+    async def create_contact(self,
             phone_number: str,
             lifecyclestage: LifecycleStage = LifecycleStage.LEAD,
             qualified: bool = False,
-            name: Optional[str] = None, 
+            name: Optional[str] = None,
             email: Optional[str] = None,
             track: Optional[Track] = None,
         ) -> str:

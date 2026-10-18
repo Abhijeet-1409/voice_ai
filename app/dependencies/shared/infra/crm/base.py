@@ -1,48 +1,7 @@
-from abc import ABC, abstractmethod
 from typing import Optional
+from abc import ABC, abstractmethod
 
 from shared.config import TicketPriority, TicketStatus, LifecycleStage, Track
-
-
-class CRMClientError(Exception):
-    """
-    Base exception class for CRM client errors.
-    """
-    def __init__(self, message: str):
-        super().__init__(message)
-        self.message = message
-
-
-class ContactNotFoundError(CRMClientError):
-    """
-    Raised when a contact_id passed to a CRM method does not correspond
-    to any existing contact. Applies to any method that takes contact_id
-    as a parameter (update_contact, create_ticket, get_tickets).
-    """
-    def __init__(self, contact_id: str):
-        super().__init__(f"No contact found with id: {contact_id}")
-        self.contact_id = contact_id
-
-
-class ContactAlreadyExistsError(CRMClientError):
-    """
-    Raised when create_contact is called with a phone_number that
-    already belongs to an existing contact. phone_number is the sole
-    identifier/unique key across the CRM, so duplicates are not allowed.
-    """
-    def __init__(self, phone_number: str):
-        super().__init__(f"A contact already exists with phone_number: {phone_number}")
-        self.phone_number = phone_number
-
-
-class TicketNotFoundError(CRMClientError):
-    """
-    Raised when a ticket_id passed to a CRM method does not correspond
-    to any existing ticket.
-    """
-    def __init__(self, ticket_id: str):
-        super().__init__(f"No ticket found with id: {ticket_id}")
-        self.ticket_id = ticket_id
 
 
 class BaseCRMClient(ABC):
@@ -157,11 +116,11 @@ class BaseCRMClient(ABC):
         Fetch a contact's most recent tickets, optionally filtered by
         status. Results are ordered most-recent-first, so the first
         item is the contact's "last ticket".
- 
+
         Used by Support Flow to check a caller's existing issues (open
         or otherwise) before logging a new one, or when the caller asks
         about a previous ticket's status.
- 
+
         Args:
             contact_id: The contact's unique ID.
             status: If provided, only tickets matching this status are
@@ -172,11 +131,11 @@ class BaseCRMClient(ABC):
                 (voice agent tools) aren't overwhelmed with a caller's
                 full ticket history; older tickets are expected to be
                 checked via a separate portal, not read aloud.
- 
+
         Returns:
             A list of dicts, each representing one matching ticket,
             ordered most-recent-first, at most `limit` items.
- 
+
         Raises:
             ContactNotFoundError: If no contact exists with contact_id.
         """
