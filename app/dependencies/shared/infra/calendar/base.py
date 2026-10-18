@@ -1,14 +1,21 @@
 from typing import Optional
+from dataclasses import dataclass
 from abc import ABC, abstractmethod
 
 from shared.config import Track
 
 
-class CalendarClientError(Exception):
-    """Base exception for calendar client errors."""
-    def __init__(self, message: str):
-        super().__init__(message)
-        self.message = message
+@dataclass(frozen=True)
+class MeetingSlot:
+    """An available or selected meeting slot.
+
+    Attributes:
+        id: Stable identifier used internally for selection.
+        value: Human-readable time label shown to the caller.
+    """
+
+    id: str
+    value: str
 
 
 class BaseCalendarClient(ABC):
@@ -18,7 +25,7 @@ class BaseCalendarClient(ABC):
     """
 
     @abstractmethod
-    async def get_available_slots(self, track: Optional[Track] = None) -> list[str]:
+    async def get_available_slots(self, track: Optional[Track] = None) -> list[MeetingSlot]:
         """
         Return a list of human-readable available meeting slots.
 
@@ -33,12 +40,12 @@ class BaseCalendarClient(ABC):
         ...
 
     @abstractmethod
-    async def book_slot(self, slot: str, contact_email: str, track: Optional[Track] = None) -> bool:
+    async def book_slot(self, slot: MeetingSlot, contact_email: str, track: Optional[Track] = None) -> bool:
         """
         Book a previously offered slot.
 
         Args:
-            slot: One of the strings previously returned by get_available_slots.
+            slot: The selected meeting slot, containing its stable identifier and human-readable time label.
             contact_email: Confirmed email to send the meeting invite to.
             track: Optional context, same as above.
 

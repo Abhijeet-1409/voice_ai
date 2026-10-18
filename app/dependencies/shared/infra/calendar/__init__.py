@@ -1,9 +1,10 @@
-from .base import BaseCalendarClient, CalendarClientError
-from .mock import MockCalendarClient, get_mockcalendarclient
+from .base import BaseCalendarClient, MeetingSlot
+from . import exceptions
+from . import adapters
 
 __all__ = [
     "BaseCalendarClient",
-    "CalendarClientError",
-    "MockCalendarClient",
-    "get_mockcalendarclient",
+    "MeetingSlot",
+    "exceptions",
+    "adapters"
 ]

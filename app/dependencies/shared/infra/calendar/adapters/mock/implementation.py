@@ -5,24 +5,11 @@ from zoneinfo import ZoneInfo
 
 from shared.logging_setup import get_logger
 from shared.config import Track
-from .base import BaseCalendarClient
+from ...base import BaseCalendarClient, MeetingSlot
 
 
-_LOGGER = "infra.calendar.mock"
+_LOGGER = "infra.calendar.adapters.mock.implementation"
 IST = ZoneInfo("Asia/Kolkata")
-
-
-@dataclass(frozen=True)
-class MeetingSlot:
-    """An available or selected meeting slot.
-
-    Attributes:
-        id: Stable identifier used internally for selection.
-        value: Human-readable time label shown to the caller.
-    """
-
-    id: str
-    value: str
 
 
 _SLOT_OFFSETS = [
