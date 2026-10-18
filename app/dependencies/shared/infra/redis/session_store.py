@@ -6,7 +6,7 @@ from redis.exceptions import RedisError
 
 from shared.logging_setup import get_logger
 from shared.config import CALL_SESSION_TTL
-from .client import get_redis_client
+from .client import get_async_redis_client
 
 
 _LOGGER = "infra.redis.session_store"
@@ -22,7 +22,7 @@ async def append_turn(stream_sid: str, speaker: str, text: str) -> None:
         text (str): The text content of the turn.
     """
 
-    redis_client = get_redis_client()
+    redis_client = get_async_redis_client()
     logger = get_logger(_LOGGER)
 
     key = f"transcript:{stream_sid}"
@@ -58,7 +58,7 @@ async def get_transcript(stream_sid: str) -> list:
         Returns an empty list if not found or if an error occurs.
     """
 
-    redis_client = get_redis_client()
+    redis_client = get_async_redis_client()
     logger = get_logger(_LOGGER)
 
     key = f"transcript:{stream_sid}"
@@ -89,7 +89,7 @@ async def delete_transcript(stream_sid: str) -> None:
         stream_sid (str): The unique identifier for the call session.
     """
 
-    redis_client = get_redis_client()
+    redis_client = get_async_redis_client()
     logger = get_logger(_LOGGER)
 
     key = f"transcript:{stream_sid}"
