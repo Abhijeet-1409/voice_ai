@@ -3,7 +3,8 @@ import asyncio
 from livekit.agents import ToolError, function_tool, RunContext
 
 from shared.logging_setup import get_logger
-from shared.infra.vector_store import get_pgvectorstore, VectorStoreError
+from shared.infra.vector_store.adapters.pg_store import get_pgvectorstore
+from shared.infra.vector_store.exceptions import VectorStoreError
 
 from config import get_worker_settings
 from rag import get_embedding_model
@@ -74,7 +75,7 @@ async def search_knowledge_base(ctx: RunContext, query: str) -> str:
             "The knowledge base is temporarily unavailable. Let the caller know a "
             "specialist will follow up with the details instead of guessing."
         ) from vec_err
-        
+
     except Exception as unexp_err:
         # Secondary, broader safety net — covers failures outside the
         # vector store itself (e.g. embedding_model.encode() raising due
