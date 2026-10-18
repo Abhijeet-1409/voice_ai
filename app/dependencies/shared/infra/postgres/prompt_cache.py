@@ -16,7 +16,19 @@ _LOGGER = "infra.postgres.prompt_cache"
 
 
 class PromptCache(Base):
-    """Store metadata for reusable Vertex AI context caches."""
+    """Store metadata for reusable Vertex AI context caches.
+
+    Attributes:
+        id: Unique identifier for the prompt cache metadata record (UUID v4).
+        prompt_type: Type of prompt cache, such as inbound or outreach.
+        vertex_cache_name: Resource name of the cached content stored in Vertex AI.
+        model: Vertex AI model associated with the cached content.
+        location: GCP region where the cached content is created and managed.
+        system_instruction_version: Version of the system instructions used to create the cache.
+        voice_agent_guide_version: Version of the voice agent guide included in the cache.
+        created_at: Timestamp when the Vertex AI cache was created.
+        expires_at: Timestamp when the Vertex AI cache is scheduled to expire.
+    """
 
     __tablename__ = "prompt_caches"
 
@@ -29,7 +41,6 @@ class PromptCache(Base):
     voice_agent_guide_version:  Mapped[int] = mapped_column(Integer, nullable=False)
     created_at:                 Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     expires_at:                 Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
 
 def sync_save_prompt_cache(
     prompt_type: PromptCacheType,
