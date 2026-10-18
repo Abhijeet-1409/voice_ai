@@ -7,7 +7,7 @@ handlers for both synchronous and asynchronous SQLAlchemy engines and session fa
 from typing import Optional
 
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import sessionmaker 
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text, create_engine, Engine
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncEngine, AsyncSession, async_sessionmaker
 
@@ -56,12 +56,12 @@ class DatabaseNotInitializedError(RuntimeError):
 
     Args:
         message: Explanation of the lifecycle initialization failure.
-            Defaults to requesting a call to `sync_db_init()` or `async_db_init()`.
+            Defaults to requesting a call to `init_db_sync()` or `init_db_async()`.
     """
 
     def __init__(
         self,
-        message: str = "Database engine has not been initialized. Call sync_db_init() or async_db_init() first."
+        message: str = "Database engine has not been initialized. Call init_db_sync() or init_db_async() first."
     ) -> None:
         self.message = message
         super().__init__(self.message)
@@ -134,7 +134,7 @@ def get_sync_sessionmaker() -> sessionmaker:
 
     if _sync_sessionmaker:
         return _sync_sessionmaker
-    
+
     session_factory: sessionmaker = sessionmaker(
         bind=engine,
         expire_on_commit=False
@@ -145,7 +145,7 @@ def get_sync_sessionmaker() -> sessionmaker:
     return session_factory
 
 
-def sync_db_init() -> None:
+def init_db_sync() -> None:
     """Verifies that the synchronous database connection pool is operational on startup.
 
     Initializes the synchronous engine and performs a readiness ping (`SELECT 1`).
@@ -166,7 +166,7 @@ def sync_db_init() -> None:
         raise
 
 
-def sync_db_close() -> None:
+def close_db_sync() -> None:
     """Safely disposes of the synchronous database connection pool during application shutdown.
 
     Closes all active pooled connections gracefully and resets the module-level singletons
@@ -260,7 +260,7 @@ def get_async_sessionmaker() -> async_sessionmaker[AsyncSession]:
 
     if _async_sessionmaker:
         return _async_sessionmaker
-    
+
     async_session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
         engine,
         class_=AsyncSession,
@@ -272,7 +272,7 @@ def get_async_sessionmaker() -> async_sessionmaker[AsyncSession]:
     return async_session_factory
 
 
-async def async_db_init() -> None:
+async def init_db_async() -> None:
     """Verifies that the asynchronous database connection pool is operational on startup.
 
     Initializes the asynchronous engine and performs a readiness ping (`SELECT 1`).
@@ -293,7 +293,7 @@ async def async_db_init() -> None:
         raise
 
 
-async def async_db_close() -> None:
+async def close_db_async() -> None:
     """Safely disposes of the asynchronous database connection pool during application shutdown.
 
     Closes all active pooled connections gracefully and resets the module-level singletons
