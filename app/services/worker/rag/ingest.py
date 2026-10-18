@@ -1,7 +1,7 @@
 import asyncio
 
-from shared.infra.postgres import db_init
-from shared.infra.vector_store import get_pgvectorstore
+from shared.infra.postgres import init_db_async
+from shared.infra.vector_store.adapters.pg_store import get_pgvectorstore
 from shared.logging_setup import get_logger
 
 from .embedding import get_embedding_model
@@ -18,7 +18,7 @@ async def run_ingestion() -> None:
     (content, vector) pair into Postgres via PgVectorStore.insert.
     Run once, standalone — not on worker startup.
     """
-    await db_init()  # Ensure the database engine is initialized before proceeding
+    await init_db_async  # Ensure the database engine is initialized before proceeding
     store = get_pgvectorstore()
     model = get_embedding_model()
 
