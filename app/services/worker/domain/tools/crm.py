@@ -4,7 +4,8 @@ from livekit.agents import ToolError, function_tool, RunContext
 
 from shared.logging_setup import get_logger
 from shared.config import TicketPriority, TicketStatus
-from shared.infra.crm import get_mockcrmclient, CRMClientError, ContactNotFoundError
+from shared.infra.crm.adapters.mock import get_mockcrmclient
+from shared.infra.crm.exceptions import CRMClientError, ContactNotFoundError
 
 from schemas import UserData
 
@@ -41,8 +42,8 @@ async def create_ticket(
     try:
         crm_client = get_mockcrmclient()
         ticket_id = await crm_client.create_ticket(
-            contact_id=userdata.customer_id, 
-            description=description, 
+            contact_id=userdata.customer_id,
+            description=description,
             priority=priority
         )
 
