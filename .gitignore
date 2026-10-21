@@ -25,6 +25,7 @@ build/
 venv/
 .venv/
 env/
+working_demo.env
 bot_venv/
 
 # ── Docker ────────────────────────────────────────────────────────────────────
