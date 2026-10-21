@@ -61,6 +61,9 @@ data/
 base_requirements.txt
 old_worker_requirements.txt
 turn_detector_models
+app/dependencies/shared/infra/redis/api_key_state.py
+app/dependencies/shared/infra/redis/customer_cache.py
+app/dependencies/shared/infra/redis/web_token_limit.py
 app/services/worker/speech 
 app/services/worker/agent/key_selector.py
 livkit_understanding/
