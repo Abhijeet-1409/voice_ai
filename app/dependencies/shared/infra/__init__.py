@@ -1,8 +1,9 @@
-from . import postgres, crm, redis, vector_store
+from . import postgres, crm, redis, vector_store, calendar
 
 __all__ = [
     "postgres",
     "crm",
     "redis",
-    "vector_store"
+    "vector_store",
+    "calendar"
 ]
