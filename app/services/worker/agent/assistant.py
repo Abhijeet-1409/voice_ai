@@ -3,7 +3,7 @@ from livekit.agents import Agent, ChatContext, function_tool, RunContext
 
 from shared.config import Track
 from shared.logging_setup import get_logger
-from shared.infra.calendar.mock import MeetingSlot
+from shared.infra.calendar import MeetingSlot
 
 from schemas import UserData
 from utils import describe
