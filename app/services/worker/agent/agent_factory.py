@@ -6,8 +6,16 @@ from shared.logging_setup import get_logger
 
 from .assistant import Assistant
 from config import get_worker_settings
-from schemas.session_data import UserData
-from domain.tools import search_knowledge_base, update_caller_info, create_ticket, get_tickets, qualify_lead
+from schemas import UserData, ToolDependencies
+from domain.tools import (
+    search_knowledge_base, 
+    update_caller_info, 
+    create_ticket, 
+    get_tickets, 
+    qualify_lead,
+    create_get_contact_info_tool,
+    create_schedule_meeting_tool,
+)
 
 
 _LOGGER = "worker.agent.agent_factory"
@@ -50,6 +58,15 @@ def build_agent(
     settings = get_worker_settings()
     call_type = user_data.call_type
 
+    tool_dependencies = ToolDependencies(
+        task_llm=task_llm,
+        agent_name=settings.AGENT_NAME,
+        company_name=settings.COMPANY_NAME,
+    )
+
+    get_contact_info = create_get_contact_info_tool(tool_dependencies)
+    schedule_meeting = create_schedule_meeting_tool(tool_dependencies)
+
     match call_type:
         case CallType.OUTREACH:
             tool_list = list(COMMON_TOOLS) + list(SALES_TOOLS)
@@ -60,6 +77,11 @@ def build_agent(
         case _:
             tool_list = list(COMMON_TOOLS)
 
+    tool_list.extend([
+        get_contact_info,
+        schedule_meeting,
+    ])
+
     assistant = Assistant(
         instructions=instructions, 
         tools=tool_list,  
@@ -67,7 +89,6 @@ def build_agent(
         company_name=settings.COMPANY_NAME,
         user_data=user_data,
         chat_ctx=chat_ctx,
-        task_llm=task_llm
     )
 
     logger.debug(
