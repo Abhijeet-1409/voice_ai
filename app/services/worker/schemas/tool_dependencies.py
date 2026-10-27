@@ -1,6 +1,7 @@
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+
 from livekit.agents.llm import LLM
 
 
@@ -25,3 +26,6 @@ class ToolDependencies(BaseModel):
     task_llm: Optional[LLM] = None
     agent_name: str
     company_name: str
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
