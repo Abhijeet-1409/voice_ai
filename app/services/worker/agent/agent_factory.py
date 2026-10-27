@@ -1,62 +1,43 @@
 from livekit.agents import ChatContext
-from livekit.agents.llm import FunctionTool, LLM
+from livekit.agents.llm import LLM
 
 from shared.config import CallType
 from shared.logging_setup import get_logger
 
 from .assistant import Assistant
+from .tool_registry import select_tools
 from config import get_worker_settings
 from schemas import UserData, ToolDependencies
-from domain.tools import (
-    search_knowledge_base, 
-    update_caller_info, 
-    create_ticket, 
-    get_tickets, 
-    qualify_lead,
-    create_get_contact_info_tool,
-    create_schedule_meeting_tool,
-)
 
 
 _LOGGER = "worker.agent.agent_factory"
 logger = get_logger(_LOGGER)
 
 
-COMMON_TOOLS: list[FunctionTool] = [search_knowledge_base, update_caller_info]
-SUPPORT_TOOLS: list[FunctionTool] = [create_ticket, get_tickets]
-SALES_TOOLS: list[FunctionTool] = [qualify_lead]
-
-
 def build_agent(
-    user_data: UserData, 
-    instructions: str, 
-    chat_ctx: ChatContext | None = None, 
-    task_llm: LLM | None = None
+    user_data: UserData,
+    instructions: str,
+    chat_ctx: ChatContext | None = None,
+    task_llm: LLM | None = None,
 ) -> Assistant:
     """
-    Constructs and configures an Assistant instance tailored to the given call's context.
+    Construct and configure an Assistant for the current call.
 
-    Dynamically selects the available FunctionTool set based on the call type:
-      - OUTREACH: Configured with COMMON_TOOLS + SALES_TOOLS.
-      - INBOUND: Configured with COMMON_TOOLS + SUPPORT_TOOLS + SALES_TOOLS.
-      - Fallback: Defaults to COMMON_TOOLS only.
-
-    Note: Bound tools on the Assistant instance itself (such as meeting scheduling) 
-    are appended automatically during Assistant initialization.
+    Creates runtime tool dependencies, selects the tools available
+    for the call type, and initializes the Assistant with the
+    resulting configuration.
 
     Args:
-        user_data (UserData): The session context for the active call.
-        instructions (str): The system prompt instructions to configure on the assistant.
-        chat_ctx (ChatContext | None, optional): An existing conversation history context 
-            to restore or initialize the assistant with. Defaults to None.
-        task_llm (LLM | None, optional): An optional secondary LLM instance designated 
-            for processing background sub-tasks. Defaults to None.
+        user_data: Session data for the active call.
+        instructions: System instructions for the assistant.
+        chat_ctx: Optional conversation context to restore.
+        task_llm: Optional LLM used by specialized subtasks.
 
     Returns:
-        Assistant: A fully configured Assistant instance ready for the voice session.
+        Assistant: A configured assistant ready for the voice session.
     """
     settings = get_worker_settings()
-    call_type = user_data.call_type
+    call_type: CallType = user_data.call_type
 
     tool_dependencies = ToolDependencies(
         task_llm=task_llm,
@@ -64,27 +45,11 @@ def build_agent(
         company_name=settings.COMPANY_NAME,
     )
 
-    get_contact_info = create_get_contact_info_tool(tool_dependencies)
-    schedule_meeting = create_schedule_meeting_tool(tool_dependencies)
-
-    match call_type:
-        case CallType.OUTREACH:
-            tool_list = list(COMMON_TOOLS) + list(SALES_TOOLS)
-
-        case CallType.INBOUND:
-            tool_list = list(COMMON_TOOLS) + list(SUPPORT_TOOLS) + list(SALES_TOOLS)
-
-        case _:
-            tool_list = list(COMMON_TOOLS)
-
-    tool_list.extend([
-        get_contact_info,
-        schedule_meeting,
-    ])
+    tool_list = select_tools(call_type, tool_dependencies)
 
     assistant = Assistant(
-        instructions=instructions, 
-        tools=tool_list,  
+        instructions=instructions,
+        tools=tool_list,
         name=settings.AGENT_NAME,
         company_name=settings.COMPANY_NAME,
         user_data=user_data,
@@ -92,8 +57,8 @@ def build_agent(
     )
 
     logger.debug(
-        f"Built Assistant for call_type='{call_type}' with {len(tool_list)} "
-        f"configured tools (plus Assistant's own bound tools)."
+        f"Built Assistant for call_type='{call_type}' with "
+        f"{len(tool_list)} configured tools."
     )
 
     return assistant
