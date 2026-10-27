@@ -26,20 +26,26 @@ _LOGGER = "worker.utils.prompt_context"
 logger = get_logger(_LOGGER)
 
 
-def build_instruction(call_type: CallType, version: Optional[Literal[1, 2]] = None) -> str:
+def build_instruction(
+    call_type: Optional[CallType] = None,
+    version: Optional[Literal[1, 2]] = None,
+) -> str:
     """
     Constructs the system prompt instruction string based on the call type and prompt version.
 
-    Selects the appropriate prompt template (`OUTREACH_PROMPT`, `INBOUND_PROMPT`, or
-    `DEFAULT_PROMPT`) based on the call type and requested version, then populates it
-    with global application settings and dynamically formatted enum references required
-    by the active call flow.
+    Selects the appropriate prompt template (`OUTREACH_SYSTEM_PROMPT`,
+    `INBOUND_SYSTEM_PROMPT`, or `DEFAULT_SYSTEM_PROMPT`) based on the call type
+    and requested version. If the call type is None or does not match a supported
+    call type, the default prompt template is selected. The selected template is
+    populated with global application settings.
 
     Args:
-        call_type (CallType): The type of call used to select the appropriate prompt template.
-        version (Optional[Literal[1, 2]]): The system prompt version to use. Version 1
-            uses the original prompts, while version 2 uses the updated prompts. Defaults
-            to None when no specific version is requested.
+        call_type (Optional[CallType]): The type of call used to select the prompt
+            template. Supports inbound and outreach calls. Defaults to None, which
+            selects the default prompt.
+        version (Optional[Literal[1, 2]]): The system prompt version to use.
+            Version 1 uses the original prompts, while version 2 uses the updated
+            prompts. Defaults to None, which selects version 1.
 
     Returns:
         str: The fully formatted system instruction prompt.
