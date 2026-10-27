@@ -1,5 +1,5 @@
 {
     "python.analysis.extraPaths": [
-        "./app/dependencies"
+        "./app/packages/shared/src"
     ]
 }
