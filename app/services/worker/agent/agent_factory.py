@@ -45,7 +45,7 @@ def build_agent(
         company_name=settings.COMPANY_NAME,
     )
 
-    tool_list = select_tools(call_type, tool_dependencies)
+    tool_list = select_tools(tool_dependencies, call_type)
 
     assistant = Assistant(
         instructions=instructions,
