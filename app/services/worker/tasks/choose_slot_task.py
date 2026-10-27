@@ -7,7 +7,7 @@ from livekit.agents.llm import LLM
 
 from shared.config import Track
 from shared.logging_setup import get_logger
-from shared.infra.calendar.mock import MeetingSlot
+from shared.infra.calendar import MeetingSlot
 
 from utils import get_slots, confirm_booking
 from utils import build_choose_slot_task_prompt
