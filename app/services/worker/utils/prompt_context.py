@@ -6,8 +6,8 @@ from shared.logging_setup import get_logger
 from schemas import UserData
 from config import get_worker_settings
 from domain import (
-        OUTREACH_SYSTEM_PROMPT, 
-        INBOUND_SYSTEM_PROMPT, 
+        OUTREACH_SYSTEM_PROMPT,
+        INBOUND_SYSTEM_PROMPT,
         DEFAULT_SYSTEM_PROMPT,
         TASK_IDENTITY_TEMPLATE,
         SUPERVISOR_CONTEXT_TEMPLATE,
@@ -15,7 +15,7 @@ from domain import (
         CONFIRM_EMAIL_TASK_PROMPT,
         CHOOSE_SLOT_TASK_PROMPT,
         OUTREACH_SYSTEM_PROMPT_V2,
-        INBOUND_SYSTEM_PROMPT_V2, 
+        INBOUND_SYSTEM_PROMPT_V2,
         DEFAULT_SYSTEM_PROMPT_V2,
         VOICE_AGENT_GUIDE,
         VOICE_AGENT_GUIDE_V2
@@ -26,31 +26,33 @@ _LOGGER = "worker.utils.prompt_context"
 logger = get_logger(_LOGGER)
 
 
-def build_instruction(user_data: UserData, version: Optional[Literal[1, 2]] = None) -> str:
+def build_instruction(call_type: CallType, version: Optional[Literal[1, 2]] = None) -> str:
     """
-    Constructs the system prompt instruction string based on the call type.
+    Constructs the system prompt instruction string based on the call type and prompt version.
 
-    Renders the appropriate prompt template (`OUTREACH_PROMPT`, `INBOUND_PROMPT`, or `DEFAULT_PROMPT`) 
-    by populating global application settings and dynamically formatting valid enum references required 
+    Selects the appropriate prompt template (`OUTREACH_PROMPT`, `INBOUND_PROMPT`, or
+    `DEFAULT_PROMPT`) based on the call type and requested version, then populates it
+    with global application settings and dynamically formatted enum references required
     by the active call flow.
 
     Args:
-        user_data (UserData): The session context containing metadata and call specifications.
-        version (Literal[1, 2]): The version of the system prompt to use. Version 1 uses the original prompts, while version 2 uses the updated prompts.
+        call_type (CallType): The type of call used to select the appropriate prompt template.
+        version (Optional[Literal[1, 2]]): The system prompt version to use. Version 1
+            uses the original prompts, while version 2 uses the updated prompts. Defaults
+            to None when no specific version is requested.
 
     Returns:
         str: The fully formatted system instruction prompt.
     """
     settings = get_worker_settings()
-    call_type = user_data.call_type
 
     if version is None:
         # Default to version 1 if not specified
         version = 1
-    
+
     if version not in (1, 2):
         logger.warning(f"Invalid version '{version}' specified — defaulting to version 1.")
-        version = 1  # fallback to version 1 if invalid 
+        version = 1  # fallback to version 1 if invalid
 
     match call_type:
         case CallType.OUTREACH:
@@ -94,14 +96,14 @@ def build_voice_agent_guide(enum_reference: str, version: Optional[Literal[1, 2]
         and enum references.
     """
     settings = get_worker_settings()
-        
+
     if version is None:
         # Default to version 1 if not specified
         version = 1
-    
+
     if version not in (1, 2):
         logger.warning(f"Invalid version '{version}' specified — defaulting to version 1.")
-        version = 1  # fallback to version 1 if invalid 
+        version = 1  # fallback to version 1 if invalid
 
     if version == 1:
         guide = VOICE_AGENT_GUIDE
