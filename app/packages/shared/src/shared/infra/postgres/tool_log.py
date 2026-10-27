@@ -14,7 +14,6 @@ from .database import get_async_sessionmaker
 
 _LOGGER = "infra.postgres.tool_log"
 logger = get_logger(_LOGGER)
-async_session = get_async_sessionmaker()
 
 
 class ToolLog(Base):
@@ -64,6 +63,8 @@ async def save_tool_log(
     Raises:
         SQLAlchemyError: If the database transaction fails.
     """
+    async_session = get_async_sessionmaker()
+
     try:
         async with async_session() as session:
             log = ToolLog(
