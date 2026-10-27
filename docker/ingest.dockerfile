@@ -42,10 +42,11 @@ RUN pip install --no-cache-dir -r /tmp/ingest.txt
 
 
 # ─────────────────────────────────────────────
-# Copy shared code
+# Install shared package from its new location
 # ─────────────────────────────────────────────
 
-COPY app/dependencies/shared /app/shared/
+COPY app/packages/shared /app/packages/shared
+RUN pip install --no-cache-dir /app/packages/shared
 
 
 # ─────────────────────────────────────────────
@@ -67,7 +68,7 @@ RUN mkdir -p /app/data /app/rag_models
 # Python import path
 # ─────────────────────────────────────────────
 
-ENV PYTHONPATH=/app:/app/worker
+ENV PYTHONPATH=/app/worker
 
 WORKDIR /app/worker
 

@@ -35,12 +35,11 @@ ENV SENTENCE_TRANSFORMERS_HOME=/app/rag_models
 
 
 # ─────────────────────────────────────────────
-# Install shared package
+# Install shared package from its new location
 # ─────────────────────────────────────────────
 
-COPY app/dependencies/ /app/dependencies/
-
-RUN pip install --no-cache-dir /app/dependencies
+COPY app/packages/shared /app/packages/shared
+RUN pip install --no-cache-dir /app/packages/shared
 
 
 # ─────────────────────────────────────────────

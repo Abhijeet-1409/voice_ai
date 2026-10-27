@@ -34,10 +34,11 @@ RUN pip install --no-cache-dir -r /tmp/migrations.txt
 
 
 # ─────────────────────────────────────────────
-# Copy shared code
+# Install shared package from its new location
 # ─────────────────────────────────────────────
 
-COPY app/dependencies/shared /app/shared/
+COPY app/packages/shared /app/packages/shared
+RUN pip install --no-cache-dir /app/packages/shared
 
 
 # ─────────────────────────────────────────────
@@ -46,12 +47,6 @@ COPY app/dependencies/shared /app/shared/
 
 COPY app/migrations /app/migrations
 
-
-# ─────────────────────────────────────────────
-# Python import path
-# ─────────────────────────────────────────────
-
-ENV PYTHONPATH=/app
 
 
 # ─────────────────────────────────────────────
