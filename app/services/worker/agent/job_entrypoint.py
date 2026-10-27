@@ -121,7 +121,7 @@ async def entrypoint(ctx: JobContext) -> None:
         user_context_block = build_user_context_block(user_data)
 
         # create system instruction
-        system_instructions = build_instruction(user_data, version=settings.SYSTEM_INSTRUCTION_VERSION)
+        system_instructions = build_instruction(user_data.call_type, version=settings.SYSTEM_INSTRUCTION_VERSION)
 
         # create voice guide content n
         enum_reference = describe_all(
