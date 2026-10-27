@@ -4,8 +4,10 @@ FROM python:3.12-slim
 # System dependencies
 # ─────────────────────────────────────────────
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 
@@ -38,7 +40,7 @@ ENV SENTENCE_TRANSFORMERS_HOME=/app/rag_models
 
 COPY requirements/ingest.txt /tmp/ingest.txt
 
-RUN pip install --no-cache-dir -r /tmp/ingest.txt
+RUN pip install --no-cache-dir --default-timeout=120 --retries=10 -r /tmp/ingest.txt
 
 
 # ─────────────────────────────────────────────
@@ -46,7 +48,7 @@ RUN pip install --no-cache-dir -r /tmp/ingest.txt
 # ─────────────────────────────────────────────
 
 COPY app/packages/shared /app/packages/shared
-RUN pip install --no-cache-dir /app/packages/shared
+RUN pip install --no-cache-dir --default-timeout=120 --retries=10 /app/packages/shared
 
 
 # ─────────────────────────────────────────────
