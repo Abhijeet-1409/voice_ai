@@ -4,6 +4,10 @@
 class PromptCacheError(Exception):
     """Base exception for all prompt-cache errors."""
 
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(message)
+
 
 # Client-side exceptions
 

@@ -1,15 +1,16 @@
-from typing import Optional
+from time import sleep
+from typing import Optional, Any
 
-from httpx import Client, Response
+from httpx import Client, Response, HTTPStatusError
 
 from pydantic import ValidationError
 
 from shared.logging_setup import get_logger
 
 from ...base import PromptCacheClient
+from ...constants import JobStatus, CacheJobErrorCode
 from ...schema import (
     CachePayload,
-    CachePayloadDict,
     CachePayloadOrDict, 
     CacheResult, 
     CacheJob
@@ -32,7 +33,9 @@ class SyncPromptCacheClient(PromptCacheClient):
 
     def __init__(self, base_url: str) -> None:
         self._logger = get_logger(_LOGGER)
-        self.httpx_client = Client(base_url=base_url)
+        self._httpx_client = Client(base_url=base_url)
+        self._attempt_interval = 2
+        self._attempt = 10
 
     def create(self, payload: CachePayloadOrDict) -> CacheResult:
         """
@@ -113,20 +116,117 @@ class SyncPromptCacheClient(PromptCacheClient):
 
         try:
         
-            self.httpx_client.post(
+            res: Response = self._httpx_client.post(
                 _endpoint,
                 json=payload.model_dump_json()
             )
 
-        except Exception as err:
-            pass 
+            res.raise_for_status()
 
+            content = res.json()
+
+            if content['cache'] is None:
+                return None
+
+            return  CacheResult(**content['cache'])  
+
+        except HTTPStatusError as http_err: 
+            self._logger.exception()
+            raise PromptCacheServiceError()
+
+        except ValidationError as valid_err:
+            self._logger.exception()
+            raise PromptCacheResponseError()
 
     def _submit_job(self, payload: CachePayload) -> CacheJob:
-        pass 
+        """
+        """
+        _endpoint = "/api/v1/cache-jobs"
 
+        try:
+
+            res: Response = self._httpx_client.post(
+                _endpoint,
+                json=payload.model_dump_json()
+            )
+
+            res.raise_for_status()
+
+            content = res.json()
+
+            return CacheJob(**content)
+
+        except HTTPStatusError as http_err: 
+            self._logger.exception()
+            raise PromptCacheServiceError()
+
+        except ValidationError as valid_err:
+            self._logger.exception()
+            raise PromptCacheResponseError()
+    
     def _wait_for_result(self, job: CacheJob) -> CacheResult:
-        pass 
+        """
+        """
+        _endpoint = f"/api/v1/cache-jobs/{job.id}"
+        polled_job: Optional[CacheJob] = None
+        attempt = self._attempt
+
+        try:
+
+            while attempt > 0:
+
+                res: Response = self._httpx_client(_endpoint)
+                
+                res.raise_for_status()
+
+                content = res.json()
+                polled_job_dict: dict[str, Any] = content['polled_job_dict']
+                service_last_attempt: bool = content['service_last_attempt']
+
+                polled_job = CacheJob(**polled_job_dict)
+
+                match polled_job.status:
+
+                    case JobStatus.PENDING:
+                        self._logger.info()
+
+                    case JobStatus.RUNNING:
+                        self._logger.info()
+
+                    case JobStatus.RETRYING:
+                        self._logger.info() 
+
+                    case JobStatus.COMPLETED:
+                        self._logger.info()
+                        return polled_job
+
+                    case JobStatus.FAILED:
+                        self._logger.info()
+                        if service_last_attempt:
+                            self._logger.info()
+                            break 
+                        
+                    case _:
+                        pass
+
+                sleep(self._attempt_interval)        
+                
+                attempt -= 1
+
+            job_error_code = polled_job.error.code    
+            job_error_msg = polled_job.error.message
+            
+            match job_error_code:
+
+                case CacheJobErrorCode.PROMPT_CACHE_DATABASE_ERROR:
+                    raise PromptCacheDatabaseError(message=job_error_msg)
+
+                case CacheJobErrorCode.PROMPT_CACHE_GEMINI_API_ERROR:
+                    raise PromptCacheGeminiAPIError(message=job_error_msg)            
+
+        except HTTPStatusError as http_err:
+            self._logger.exception()
+            raise PromptCacheServiceError()
 
     def _close(self) -> None:
         self.httpx_client.close()
