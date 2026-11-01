@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prompt-cache-client"
+version = "0.1.0"
+description = "Synchronous and asynchronous Python clients for the Intelics Prompt Cache Service"
+requires-python = ">=3.10"
+
+dependencies = [
+    "httpx>=0.27.0",
+    "pydantic==2.13.0",
+    "pydantic-settings==2.14.2",
+    "shared==0.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["prompt_cache_client*"]
