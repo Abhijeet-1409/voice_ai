@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from time import monotonic, sleep
-from typing import Any, NoReturn
+from typing import Any, NoReturn, Type
 
 import httpx
 from pydantic import ValidationError
@@ -12,7 +12,8 @@ from ...base import PromptCacheClient
 from ...constants import CacheJobErrorCode, JobStatus
 from ...cache_client_settings import get_prompt_cache_settings
 from ...schema import (
-    CacheJob,
+    CacheJobStatusResponse,
+    CacheJobSubmissionResponse,
     CacheLookupResponse,
     CachePayload,
     CachePayloadOrDict,
@@ -23,34 +24,68 @@ from ...exceptions import (
     PromptCacheConnectionError,
     PromptCacheDatabaseError,
     PromptCacheGeminiAPIError,
+    PromptCacheGeminiAuthError,
+    PromptCacheInternalError,
+    PromptCacheInvalidPayloadError,
+    PromptCacheJobDeadlineExceededError,
+    PromptCacheJobNotFoundError,
     PromptCacheResponseError,
     PromptCacheServiceError,
     PromptCacheTimeoutError,
+    PromptCacheUnsupportedConfigurationError,
+    PromptCacheWorkerInterruptedError,
 )
 
 
 _LOGGER = "prompt_cache.adapters.sync_client"
 
+_SERVICE_ERROR_TYPES: dict[str, Type[PromptCacheServiceError]] = {
+    CacheJobErrorCode.PROMPT_CACHE_DATABASE_ERROR.value: PromptCacheDatabaseError,
+    CacheJobErrorCode.PROMPT_CACHE_GEMINI_API_ERROR.value: PromptCacheGeminiAPIError,
+    CacheJobErrorCode.PROMPT_CACHE_INVALID_PAYLOAD.value: PromptCacheInvalidPayloadError,
+    CacheJobErrorCode.PROMPT_CACHE_GEMINI_AUTH_ERROR.value: PromptCacheGeminiAuthError,
+    CacheJobErrorCode.PROMPT_CACHE_UNSUPPORTED_CONFIGURATION.value: (
+        PromptCacheUnsupportedConfigurationError
+    ),
+    CacheJobErrorCode.PROMPT_CACHE_JOB_DEADLINE_EXCEEDED.value: (
+        PromptCacheJobDeadlineExceededError
+    ),
+    CacheJobErrorCode.PROMPT_CACHE_WORKER_INTERRUPTED.value: (
+        PromptCacheWorkerInterruptedError
+    ),
+    CacheJobErrorCode.PROMPT_CACHE_INTERNAL_ERROR.value: PromptCacheInternalError,
+    CacheJobErrorCode.PROMPT_CACHE_JOB_NOT_FOUND.value: PromptCacheJobNotFoundError,
+}
+
 
 class SyncPromptCacheClient(PromptCacheClient):
     """Synchronous HTTP client for the Prompt Cache Service.
 
-    Provides the complete client-side workflow for obtaining a prompt cache:
-    validate the cache payload, look up an existing reusable cache, submit a
-    cache-creation job when no reusable cache exists, and poll that job until
-    it reaches a terminal state.
+    The client implements the complete client-side cache retrieval workflow:
+    validate the payload, look up an existing cache, submit a job on a cache
+    miss, and poll the job until it completes or fails.
 
-    Each instance is intended for one prompt-cache operation. The underlying
-    ``httpx.Client`` is closed automatically by ``create()`` in a ``finally``
-    block, including when validation, HTTP communication, response parsing,
-    or job processing raises an exception. Create a new instance for each
-    independent operation; do not reuse an instance after ``create()`` returns
-    or raises.
+    One instance is intended for one ``create`` operation. The underlying
+    :class:`httpx.Client` is closed automatically when ``create`` finishes,
+    including when the operation raises an exception. Create a new instance
+    for each independent cache operation.
 
-    This class is responsible for HTTP transport, response validation,
-    polling, and translating service errors into the client's exception
-    hierarchy. Cache creation, persistence, locking, and retry execution
-    remain responsibilities of the Prompt Cache Service.
+    Cache validity classification, background refresh, job creation,
+    persistence, provider retries, worker leases, and backend job deadlines
+    are owned by the Prompt Cache Service. The client only waits up to its
+    configured overall operation timeout; timing out locally does not cancel
+    the backend job.
+
+    Attributes:
+        base_url: Base URL of the Prompt Cache Service.
+        lookup_endpoint: Relative endpoint used to look up a reusable cache.
+        create_job_endpoint: Relative endpoint used to submit a cache job.
+        get_job_endpoint: Endpoint template used to retrieve a job's status.
+        request_timeout: Maximum duration of one HTTP request, further capped
+            by the remaining overall operation budget.
+        poll_interval: Delay between requests while a job is nonterminal.
+        operation_timeout: Maximum duration of lookup, submission, and polling
+            combined.
     """
 
     def __init__(
@@ -60,16 +95,36 @@ class SyncPromptCacheClient(PromptCacheClient):
         lookup_endpoint: str = "/api/v1/caches/lookup",
         create_job_endpoint: str = "/api/v1/cache-jobs",
         get_job_endpoint: str = "/api/v1/cache-jobs/{job_id}",
-        request_timeout: float = 10.0,
-        poll_interval: float = 2.0,
-        poll_timeout: float = 120.0,
+        request_timeout: float = 3.0,
+        poll_interval: float = 1.0,
+        operation_timeout: float = 15.0,
     ) -> None:
+        """Initialize a one-operation synchronous HTTP client.
+
+        Args:
+            base_url: Absolute base URL of the Prompt Cache Service.
+            lookup_endpoint: Relative path for ``POST /caches/lookup``.
+            create_job_endpoint: Relative path for ``POST /cache-jobs``.
+            get_job_endpoint: Relative path for ``GET /cache-jobs/{job_id}``.
+            request_timeout: Positive maximum timeout for an individual HTTP
+                request. Every request is additionally limited by the
+                remaining overall operation time.
+            poll_interval: Positive delay between job-status polling requests.
+            operation_timeout: Positive total client-side budget covering
+                lookup, job submission, and status polling.
+
+        Raises:
+            ValueError: If the URL, endpoint paths, or timeout values are
+                invalid.
+        """
+        if not base_url.strip():
+            raise ValueError("base_url must not be empty.")
         if request_timeout <= 0:
             raise ValueError("request_timeout must be greater than zero.")
         if poll_interval <= 0:
             raise ValueError("poll_interval must be greater than zero.")
-        if poll_timeout <= 0:
-            raise ValueError("poll_timeout must be greater than zero.")
+        if operation_timeout <= 0:
+            raise ValueError("operation_timeout must be greater than zero.")
         if not lookup_endpoint.strip():
             raise ValueError("lookup_endpoint must not be empty.")
         if not create_job_endpoint.strip():
@@ -85,106 +140,147 @@ class SyncPromptCacheClient(PromptCacheClient):
             timeout=request_timeout,
             follow_redirects=False,
         )
+        self._base_url = base_url
         self._lookup_endpoint = lookup_endpoint
         self._create_job_endpoint = create_job_endpoint
         self._get_job_endpoint = get_job_endpoint
         self._request_timeout = request_timeout
         self._poll_interval = poll_interval
-        self._poll_timeout = poll_timeout
+        self._operation_timeout = operation_timeout
+        self._logger.info("Initialized prompt-cache client for %s.", base_url)
 
-        self._logger.info(f"Initialized prompt-cache client for {base_url}.")
+    def create(self, cache_payload: CachePayloadOrDict) -> CacheResult:
+        """Retrieve a reusable cache or request creation of a new cache.
 
-    def create(self, payload: CachePayloadOrDict) -> CacheResult:
-        """Get a reusable prompt cache or create a new one.
+        The payload is validated locally before the overall operation timer
+        starts. The client then performs a cache lookup. If the service returns
+        a reusable cache, it is returned immediately. Otherwise, the client
+        submits a cache-creation job and polls the job-status endpoint until
+        the job completes, fails, or the overall operation deadline expires.
 
-        The operation validates ``payload`` and first asks the service whether
-        a reusable cache already exists. On a cache hit, the existing cache
-        result is returned immediately. On a cache miss, the client submits a
-        creation job and polls its status until the job completes, fails, or
-        the configured polling deadline expires.
+        The same deadline is shared by lookup, submission, and every polling
+        request; it is not reset between stages. When the client deadline
+        expires, the client stops waiting but does not cancel the server-side
+        job. The Prompt Cache Service may continue processing that job.
 
-        The HTTPX client is closed in the ``finally`` block after the operation
-        finishes, regardless of its outcome. Consequently, this client
-        instance must not be reused after this method has been called.
+        The underlying HTTPX client is always closed before this method exits.
+        Consequently, this client instance must not be reused after calling
+        ``create``.
 
         Args:
-            payload: A ``CachePayload`` instance or a dictionary that can be
-                validated as a ``CachePayload``.
+            cache_payload: A :class:`CachePayload` instance or dictionary
+                containing the required prompt-cache type, instruction,
+                voice-agent guide, and tool-schema keys. ``tool_schema`` may
+                be an empty list, but the key itself is required.
 
         Returns:
-            The existing or newly created cache, including its resource name,
-            reuse indicator, and expiry information.
+            The existing or newly created cache resource, including its name,
+            reuse indicator, and expiration timestamp when supplied.
 
         Raises:
-            PromptCacheClientError: The payload is invalid, the client is
-                closed, or the request configuration is invalid.
-            PromptCacheConnectionError: The service cannot be reached due to
-                a network or connection failure.
-            PromptCacheTimeoutError: An HTTP request or the overall job
-                polling operation exceeds its configured deadline.
-            PromptCacheResponseError: A service response is invalid,
-                unexpected, or inconsistent with the requested job.
-            PromptCacheDatabaseError: The service reports a database failure.
-            PromptCacheGeminiAPIError: The service reports a Gemini/Vertex AI
-                cache-creation failure.
-            PromptCacheServiceError: The service reports another job or
-                server-side failure.
+            PromptCacheClientError: The payload is invalid locally, the client
+                is closed, or the HTTP request configuration is invalid.
+            PromptCacheConnectionError: The service cannot be reached because
+                of a network or connection failure.
+            PromptCacheTimeoutError: An individual request or the overall
+                client-side operation exceeds its configured deadline. This
+                does not indicate that the backend job was cancelled.
+            PromptCacheResponseError: A response is malformed, violates the
+                API schema, or refers to an unexpected job identifier.
+            PromptCacheServiceError: The service reports a job or request
+                failure. More specific subclasses identify known error codes.
         """
         try:
             self._logger.info("Starting prompt-cache retrieval or creation.")
-            validated_payload = self._validate_payload(payload)
+            validated_payload = self._validate_payload(cache_payload)
 
+            # One monotonic deadline is shared across all network stages.
+            deadline = monotonic() + self._operation_timeout
             self._logger.debug(
-                f"Looking up reusable cache for type "
-                f"'{validated_payload.prompt_cache_type}'."
+                "Looking up reusable cache for type '%s'.",
+                validated_payload.prompt_cache_type,
             )
-            cached_result = self._retrieve(validated_payload)
+            cached_result = self._retrieve(validated_payload, deadline)
 
             if cached_result is not None:
                 self._logger.info(
-                    f"Reusing existing prompt cache '{cached_result.cache_name}'."
+                    "Reusing existing prompt cache '%s'.", cached_result.cache_name
                 )
                 return cached_result
 
             self._logger.info(
-                f"No reusable cache found for type "
-                f"'{validated_payload.prompt_cache_type}'; submitting a job."
+                "No reusable cache found for type '%s'; submitting a job.",
+                validated_payload.prompt_cache_type,
             )
-            job = self._submit_job(validated_payload)
+            job = self._submit_job(validated_payload, deadline)
             self._logger.info(
-                f"Cache-creation job accepted: job_id={job.id}, "
-                f"status={job.status.value}."
+                "Cache job accepted: job_id=%s, status=%s, created=%s.",
+                job.id,
+                job.status.value,
+                job.created,
             )
 
-            result = self._wait_for_result(job)
+            result = self._wait_for_result(job, deadline)
             self._logger.info(
-                f"Prompt-cache operation completed: cache_name={result.cache_name}."
+                "Prompt-cache operation completed: cache_name=%s.",
+                result.cache_name,
             )
             return result
         finally:
             self.close()
 
     def _validate_payload(self, payload: CachePayloadOrDict) -> CachePayload:
-        """Normalize supported input forms into a validated Pydantic model."""
+        """Normalize an accepted payload into the validated Pydantic model.
+
+        Args:
+            payload: A Pydantic payload or dictionary-form payload.
+
+        Returns:
+            A validated :class:`CachePayload` instance.
+
+        Raises:
+            PromptCacheClientError: If local payload validation fails.
+        """
         if isinstance(payload, CachePayload):
             return payload
 
         try:
             return CachePayload.model_validate(payload)
         except ValidationError as exc:
-            self._logger.error(f"Invalid prompt-cache payload: {exc}")
+            self._logger.error("Invalid prompt-cache payload: %s", exc)
             raise PromptCacheClientError(
                 f"Invalid prompt-cache payload: {exc}"
             ) from exc
 
-    def _retrieve(self, payload: CachePayload) -> CacheResult | None:
-        """Look up a reusable cache; return None for an ordinary cache miss."""
-        endpoint = self._lookup_endpoint
-        self._logger.debug(f"Sending cache lookup request to {endpoint}.")
+    def _retrieve(
+        self, payload: CachePayload, deadline: float
+    ) -> CacheResult | None:
+        """Look up a reusable cache, returning ``None`` for an ordinary miss.
 
+        The service may transparently initiate a background refresh for a
+        cache that is approaching expiration. The client does not need to know
+        whether a returned cache is classified internally as valid or expiring;
+        either cache is still usable and is returned through the same field.
+
+        Args:
+            payload: Validated cache lookup payload.
+            deadline: Absolute monotonic deadline shared by the full operation.
+
+        Returns:
+            A reusable cache result, or ``None`` when the cache is missing or
+            already expired.
+
+        Raises:
+            PromptCacheTimeoutError: The overall operation deadline expires.
+            PromptCacheConnectionError: The service cannot be reached.
+            PromptCacheResponseError: The lookup response is invalid.
+            PromptCacheServiceError: The service reports a structured failure.
+        """
+        self._logger.debug("Sending cache lookup request to %s.", self._lookup_endpoint)
         response = self._request(
             "POST",
-            endpoint,
+            self._lookup_endpoint,
+            deadline=deadline,
             json=payload.model_dump(mode="json"),
         )
 
@@ -201,89 +297,96 @@ class SyncPromptCacheClient(PromptCacheClient):
             return None
 
         self._logger.info(
-            f"Cache lookup completed: found '{lookup.cache.cache_name}'."
+            "Cache lookup completed: found '%s'.", lookup.cache.cache_name
         )
         return lookup.cache
 
-    def _submit_job(self, payload: CachePayload) -> CacheJob:
-        """Submit a cache-creation job and return its initial persisted state."""
-        endpoint = self._create_job_endpoint
-        self._logger.debug(f"Submitting cache-creation job to {endpoint}.")
+    def _submit_job(
+        self, payload: CachePayload, deadline: float
+    ) -> CacheJobSubmissionResponse:
+        """Submit a cache-creation job and parse its submission acknowledgement.
 
+        The service may create a new job or return an existing active job for
+        the same cache signature. The ``created`` field indicates which case
+        occurred; both cases use the same subsequent status-polling workflow.
+
+        Args:
+            payload: Validated cache creation payload.
+            deadline: Absolute monotonic deadline shared by the full operation.
+
+        Returns:
+            The job identifier, its initial active status, and whether this
+            request created the job.
+
+        Raises:
+            PromptCacheTimeoutError: The overall operation deadline expires.
+            PromptCacheConnectionError: The service cannot be reached.
+            PromptCacheResponseError: The submission response is invalid.
+            PromptCacheServiceError: The service reports a structured failure.
+        """
+        self._logger.debug(
+            "Submitting cache-creation job to %s.", self._create_job_endpoint
+        )
         response = self._request(
             "POST",
-            endpoint,
+            self._create_job_endpoint,
+            deadline=deadline,
             json=payload.model_dump(mode="json"),
         )
 
         try:
-            job = CacheJob.model_validate(response.json())
+            job = CacheJobSubmissionResponse.model_validate(response.json())
         except (ValueError, ValidationError) as exc:
             self._logger.exception("Invalid cache-job submission response.")
             raise PromptCacheResponseError(
                 f"Invalid cache-job submission response: {exc}"
             ) from exc
 
-        self._logger.info(
-            f"Received cache job: id={job.id}, status={job.status.value}."
-        )
         return job
 
-    def _wait_for_result(self, job: CacheJob) -> CacheResult:
-        """Poll the service until the submitted job reaches a terminal state.
+    def _wait_for_result(
+        self, job: CacheJobSubmissionResponse, deadline: float
+    ) -> CacheResult:
+        """Poll a job until completion, failure, or the shared deadline.
 
-        A new GET request is made on each iteration. ``PENDING``, ``RUNNING``,
-        and ``RETRYING`` are non-terminal states, so the method waits for the
-        configured poll interval and then checks the job again. ``COMPLETED``
-        returns the job result. ``FAILED`` is translated into a client
-        exception. The overall polling deadline prevents an endless wait.
+        Each GET request retrieves only the job's current status while the job
+        is nonterminal. A ``COMPLETED`` response must include a cache result; a
+        ``FAILED`` response must include structured error information. The
+        overall deadline is the same deadline established before cache lookup;
+        it is not restarted when job polling begins.
 
         Args:
-            job: The initial job representation returned by job submission.
+            job: Job acknowledgement returned by the create-job endpoint.
+            deadline: Absolute monotonic deadline for the complete client
+                operation, including lookup and job submission.
 
         Returns:
-            The result produced by the completed cache-creation job.
+            The cache result persisted by the service for the completed job.
 
         Raises:
-            PromptCacheTimeoutError: The job does not reach a terminal state
-                before the polling deadline.
-            PromptCacheResponseError: The polling response is invalid or
-                inconsistent with the submitted job.
-            PromptCacheServiceError: The job reaches ``FAILED`` and the
-                service reports an error.
+            PromptCacheTimeoutError: The complete client operation exceeds its
+                configured deadline.
+            PromptCacheResponseError: A polling response is malformed, belongs
+                to a different job, or violates terminal-state requirements.
+            PromptCacheServiceError: The job reaches ``FAILED`` and the service
+                reports a structured failure.
         """
         endpoint = self._get_job_endpoint.format(job_id=job.id)
-        deadline = monotonic() + self._poll_timeout
         last_logged_status: JobStatus | None = None
-
         self._logger.info(
-            f"Waiting for cache job {job.id}; "
-            f"poll_interval={self._poll_interval}s, "
-            f"poll_timeout={self._poll_timeout}s."
+            "Waiting for cache job %s; poll_interval=%ss.",
+            job.id,
+            self._poll_interval,
         )
 
         while True:
-            remaining = deadline - monotonic()
-            if remaining <= 0:
-                message = (
-                    f"Timed out waiting for cache job {job.id} "
-                    f"after {self._poll_timeout} seconds."
-                )
-                self._logger.error(message)
-                raise PromptCacheTimeoutError(message)
-
-            # Bound each individual GET by the remaining overall polling time.
-            response = self._request(
-                "GET",
-                endpoint,
-                timeout=min(self._request_timeout, remaining),
-            )
+            response = self._request("GET", endpoint, deadline=deadline)
 
             try:
-                polled_job = CacheJob.model_validate(response.json())
+                polled_job = CacheJobStatusResponse.model_validate(response.json())
             except (ValueError, ValidationError) as exc:
                 self._logger.exception(
-                    f"Invalid polling response for cache job {job.id}."
+                    "Invalid polling response for cache job %s.", job.id
                 )
                 raise PromptCacheResponseError(
                     f"Invalid polling response for cache job {job.id}: {exc}"
@@ -297,87 +400,106 @@ class SyncPromptCacheClient(PromptCacheClient):
                 self._logger.error(message)
                 raise PromptCacheResponseError(message)
 
-            # Log state transitions rather than repeating the same log every poll.
             if polled_job.status != last_logged_status:
                 self._logger.info(
-                    f"Cache job {job.id} status: {polled_job.status.value}."
+                    "Cache job %s status: %s.", job.id, polled_job.status.value
                 )
                 last_logged_status = polled_job.status
 
             match polled_job.status:
                 case JobStatus.COMPLETED:
-                    if polled_job.result is None:
-                        message = (
-                            f"Cache job {job.id} is completed but has no result."
-                        )
-                        self._logger.error(message)
-                        raise PromptCacheResponseError(message)
-
+                    # CacheJobStatusResponse validates that result is present.
+                    assert polled_job.result is not None
                     return polled_job.result
 
                 case JobStatus.FAILED:
-                    if polled_job.error is None:
-                        message = (
-                            f"Cache job {job.id} failed without error details."
-                        )
-                        self._logger.error(message)
-                        raise PromptCacheResponseError(message)
-
-                    self._raise_job_error(polled_job)
+                    # CacheJobStatusResponse validates that error is present.
+                    assert polled_job.error is not None
+                    self._raise_service_error(
+                        polled_job.error.code,
+                        polled_job.error.message,
+                    )
 
                 case JobStatus.PENDING | JobStatus.RUNNING | JobStatus.RETRYING:
-                    # Non-terminal state: wait, then GET the latest job state.
-                    remaining = deadline - monotonic()
-                    if remaining > 0:
-                        sleep(min(self._poll_interval, remaining))
+                    remaining = self._remaining_time(
+                        deadline,
+                        operation=f"waiting for cache job {job.id}",
+                    )
+                    sleep(min(self._poll_interval, remaining))
 
                 case _:
-                    # Defensive fallback if the status model is extended later.
                     raise PromptCacheResponseError(
                         f"Unexpected status for cache job {job.id}: "
                         f"{polled_job.status!r}."
                     )
 
-    def _raise_job_error(self, job: CacheJob) -> NoReturn:
-        """Raise the client exception corresponding to a failed service job.
-
-        This method never returns normally: it always raises an exception.
+    def _remaining_time(self, deadline: float, *, operation: str) -> float:
+        """Return the remaining operation budget or raise on deadline expiry.
 
         Args:
-            job: A failed job containing the service-reported error code and
-                message.
+            deadline: Absolute deadline expressed in ``time.monotonic`` units.
+            operation: Short description used in the timeout message.
+
+        Returns:
+            Positive number of seconds remaining before the operation deadline.
 
         Raises:
-            PromptCacheResponseError: The failed job has no error details.
-            PromptCacheDatabaseError: The service reports a database failure.
-            PromptCacheGeminiAPIError: The service reports a Gemini API failure.
-            PromptCacheServiceError: The service reports an unrecognized error.
+            PromptCacheTimeoutError: No time remains in the overall operation
+                budget. The backend job, if already submitted, is not cancelled.
         """
-        if job.error is None:
-            raise PromptCacheResponseError(
-                f"Cache job {job.id} failed without an error object."
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            message = (
+                f"Prompt-cache client operation exceeded its configured "
+                f"{self._operation_timeout}-second deadline while {operation}. "
+                "The backend job, if already submitted, was not cancelled."
             )
+            self._logger.warning(message)
+            raise PromptCacheTimeoutError(message)
+        return remaining
 
-        message = job.error.message
-        code = job.error.code
-        self._logger.error(
-            f"Cache job {job.id} failed: code={code.value}, message={message}"
-        )
+    def _request(
+        self,
+        method: str,
+        endpoint: str,
+        *,
+        deadline: float,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """Send one HTTP request within the remaining overall time budget.
 
-        if code == CacheJobErrorCode.PROMPT_CACHE_DATABASE_ERROR:
-            raise PromptCacheDatabaseError(message)
+        The effective HTTP timeout is the smaller of the configured per-request
+        timeout and the remaining overall operation budget. This prevents an
+        individual lookup, submission, or polling request from extending the
+        complete client operation beyond its deadline.
 
-        if code == CacheJobErrorCode.PROMPT_CACHE_GEMINI_API_ERROR:
-            raise PromptCacheGeminiAPIError(message)
+        Args:
+            method: HTTP method, such as ``POST`` or ``GET``.
+            endpoint: Relative service endpoint.
+            deadline: Absolute monotonic deadline for the complete operation.
+            **kwargs: Additional keyword arguments passed to
+                :meth:`httpx.Client.request`.
 
-        raise PromptCacheServiceError(message)
+        Returns:
+            The successful HTTP response.
 
-    def _request(self, method: str, endpoint: str, **kwargs: Any) -> httpx.Response:
-        """Send an HTTP request and translate HTTPX exceptions consistently."""
+        Raises:
+            PromptCacheClientError: The HTTPX client is already closed or the
+                request configuration is invalid.
+            PromptCacheConnectionError: A network or connection failure occurs.
+            PromptCacheTimeoutError: The request or overall operation times out.
+            PromptCacheResponseError: The service returns an invalid protocol
+                response.
+            PromptCacheServiceError: The service returns a non-success status.
+        """
         if self._httpx_client.is_closed:
-            raise PromptCacheClientError(
-                "The prompt-cache HTTP client is closed."
-            )
+            raise PromptCacheClientError("The prompt-cache HTTP client is closed.")
+
+        remaining = self._remaining_time(
+            deadline,
+            operation=f"sending {method} {endpoint}",
+        )
+        kwargs["timeout"] = min(self._request_timeout, remaining)
 
         try:
             response = self._httpx_client.request(method, endpoint, **kwargs)
@@ -385,32 +507,30 @@ class SyncPromptCacheClient(PromptCacheClient):
             return response
 
         except httpx.TimeoutException as exc:
-            self._logger.exception(
-                f"HTTP timeout during {method} {endpoint}: {exc}"
-            )
+            self._logger.warning("HTTP timeout during %s %s: %s", method, endpoint, exc)
             raise PromptCacheTimeoutError(
                 f"The prompt-cache service request timed out: {exc}"
             ) from exc
 
-        except httpx.NetworkError as exc:
-            self._logger.exception(
-                f"Network failure during {method} {endpoint}: {exc}"
-            )
-            raise PromptCacheConnectionError(
-                f"Network communication with the prompt-cache service failed: {exc}"
-            ) from exc
-
         except httpx.ProxyError as exc:
             self._logger.exception(
-                f"Proxy connection failure during {method} {endpoint}: {exc}"
+                "Proxy connection failure during %s %s: %s", method, endpoint, exc
             )
             raise PromptCacheConnectionError(
                 f"Unable to communicate through the configured proxy: {exc}"
             ) from exc
 
+        except httpx.NetworkError as exc:
+            self._logger.exception(
+                "Network failure during %s %s: %s", method, endpoint, exc
+            )
+            raise PromptCacheConnectionError(
+                f"Network communication with the prompt-cache service failed: {exc}"
+            ) from exc
+
         except httpx.RemoteProtocolError as exc:
             self._logger.exception(
-                f"Invalid HTTP response from service during {method} {endpoint}: {exc}"
+                "Invalid HTTP response during %s %s: %s", method, endpoint, exc
             )
             raise PromptCacheResponseError(
                 f"The prompt-cache service returned an invalid HTTP response: {exc}"
@@ -418,7 +538,7 @@ class SyncPromptCacheClient(PromptCacheClient):
 
         except httpx.DecodingError as exc:
             self._logger.exception(
-                f"Response decoding failed during {method} {endpoint}: {exc}"
+                "Response decoding failed during %s %s: %s", method, endpoint, exc
             )
             raise PromptCacheResponseError(
                 f"Unable to decode the prompt-cache service response: {exc}"
@@ -426,7 +546,7 @@ class SyncPromptCacheClient(PromptCacheClient):
 
         except httpx.TooManyRedirects as exc:
             self._logger.exception(
-                f"Too many redirects during {method} {endpoint}: {exc}"
+                "Too many redirects during %s %s: %s", method, endpoint, exc
             )
             raise PromptCacheClientError(
                 f"The prompt-cache request exceeded the redirect limit: {exc}"
@@ -436,14 +556,14 @@ class SyncPromptCacheClient(PromptCacheClient):
             self._raise_http_status_error(exc)
 
         except httpx.InvalidURL as exc:
-            self._logger.exception(f"Invalid URL for {method} {endpoint}: {exc}")
+            self._logger.exception("Invalid URL for %s %s: %s", method, endpoint, exc)
             raise PromptCacheClientError(
                 f"Invalid prompt-cache service URL: {exc}"
             ) from exc
 
         except (httpx.UnsupportedProtocol, httpx.LocalProtocolError) as exc:
             self._logger.exception(
-                f"Invalid HTTP client configuration during {method} {endpoint}: {exc}"
+                "Invalid HTTP configuration during %s %s: %s", method, endpoint, exc
             )
             raise PromptCacheClientError(
                 f"Invalid prompt-cache HTTP request configuration: {exc}"
@@ -451,100 +571,133 @@ class SyncPromptCacheClient(PromptCacheClient):
 
         except httpx.RequestError as exc:
             self._logger.exception(
-                f"Unexpected HTTPX request failure during {method} {endpoint}: {exc}"
+                "Unexpected HTTPX request failure during %s %s: %s",
+                method,
+                endpoint,
+                exc,
             )
             raise PromptCacheClientError(
                 f"The prompt-cache HTTP request failed: {exc}"
             ) from exc
 
     def _raise_http_status_error(self, exc: httpx.HTTPStatusError) -> NoReturn:
-        """Map a non-2xx service response to the appropriate client exception."""
+        """Translate an HTTP error response into a typed client exception.
+
+        Structured service error codes take precedence over HTTP status-based
+        fallbacks. This allows the service to return a precise error category
+        in a consistent response envelope.
+
+        Args:
+            exc: HTTPX exception containing the unsuccessful response.
+
+        Raises:
+            PromptCacheServiceError: A structured or generic service failure.
+            PromptCacheTimeoutError: The HTTP response indicates a request
+                timeout or gateway timeout without a more specific error code.
+        """
         response = exc.response
         status_code = response.status_code
-        body: Any = None
 
         try:
-            body = response.json()
+            body: Any = response.json()
         except ValueError:
-            # The response may be plain text or may not contain valid JSON.
             body = None
 
         detail: Any = body
         if isinstance(body, dict):
             detail = body.get("detail", body.get("error", body))
 
+        code = ""
         if isinstance(detail, dict):
             code = str(detail.get("code", "")).lower()
             message = str(
                 detail.get("message")
+                or detail.get("detail")
                 or f"Prompt-cache service returned HTTP {status_code}."
             )
         else:
-            code = ""
             message = str(detail or response.text[:500] or exc)
 
         self._logger.error(
-            f"Prompt-cache service returned HTTP {status_code}: {message}"
+            "Prompt-cache service returned HTTP %s: %s", status_code, message
         )
 
-        if code == CacheJobErrorCode.PROMPT_CACHE_DATABASE_ERROR.value:
-            raise PromptCacheDatabaseError(message) from exc
-
-        if code == CacheJobErrorCode.PROMPT_CACHE_GEMINI_API_ERROR.value:
-            raise PromptCacheGeminiAPIError(message) from exc
+        if code:
+            self._raise_service_error(code, message)
 
         if status_code in (408, 504):
             raise PromptCacheTimeoutError(message) from exc
-
+        if status_code == 404:
+            raise PromptCacheJobNotFoundError(message) from exc
         if status_code in (400, 422):
-            raise PromptCacheClientError(message) from exc
+            raise PromptCacheInvalidPayloadError(message) from exc
 
         raise PromptCacheServiceError(
             f"Prompt-cache service returned HTTP {status_code}: {message}"
         ) from exc
 
-    def close(self) -> None:
-        """Close the HTTPX client and release this operation's network resources.
+    def _raise_service_error(self, code: str | CacheJobErrorCode, message: str) -> NoReturn:
+        """Raise the service exception corresponding to a structured error code.
 
-        ``create()`` calls this method automatically in a ``finally`` block,
-        so cleanup occurs after both successful and unsuccessful operations.
-        Calling this method explicitly is also safe; if the client is already
-        closed, the method returns without doing anything.
+        Args:
+            code: Service error code from the API response or failed job.
+            message: Human-readable service-provided error message.
+
+        Raises:
+            PromptCacheServiceError: Always raises the most specific known
+                service exception, or the generic service exception when the
+                code is unknown.
+        """
+        code_value = code.value if isinstance(code, CacheJobErrorCode) else str(code).lower()
+        exception_type = _SERVICE_ERROR_TYPES.get(code_value)
+        if exception_type is None:
+            raise PromptCacheServiceError(
+                f"Prompt-cache service reported an unrecognized error "
+                f"({code_value}): {message}"
+            )
+        raise exception_type(message)
+
+    def close(self) -> None:
+        """Close the HTTPX client and release its network resources.
+
+        ``create`` invokes this method in a ``finally`` block. Calling it more
+        than once is safe; if the HTTPX client is already closed, this method
+        returns without performing additional work.
+
+        Raises:
+            PromptCacheClientError: If HTTPX cannot close the client cleanly.
         """
         if self._httpx_client.is_closed:
             return
 
-        self._logger.info("Closing prompt-cache HTTP client.")
+        self._logger.debug("Closing prompt-cache HTTP client.")
         try:
             self._httpx_client.close()
         except httpx.CloseError as exc:
-            self._logger.exception(f"Failed to close prompt-cache HTTP client: {exc}")
+            self._logger.exception("Failed to close prompt-cache HTTP client: %s", exc)
             raise PromptCacheClientError(
                 f"Failed to close prompt-cache HTTP client: {exc}"
             ) from exc
 
 
-
 def create_prompt_cache_client() -> SyncPromptCacheClient:
-    """Create a prompt-cache client configured from application settings.
+    """Create a one-operation synchronous client from cached settings.
 
-    Loads the cached, validated ``PromptCacheClientSettings`` and passes the
-    service URL, endpoint paths, request timeout, and polling configuration to
-    a new ``SyncPromptCacheClient`` instance.
-
-    A new client is created for each call because ``create()`` closes its
-    underlying HTTPX client when the prompt-cache operation finishes. Do not
-    reuse the returned client for a second ``create()`` operation.
+    The factory loads the validated client settings and constructs a new
+    :class:`SyncPromptCacheClient`. A new instance is returned for each call
+    because ``create`` closes the underlying HTTPX client when its operation
+    finishes.
 
     Returns:
-        SyncPromptCacheClient: A newly configured client for one operation.
+        A synchronous client configured with the service URL, endpoint paths,
+        per-request timeout, polling interval, and overall operation timeout.
 
     Raises:
-        ValidationError: If the prompt-cache settings cannot be loaded or
-            validated.
-        ValueError: If the configured endpoint or timeout values are invalid.
+        pydantic.ValidationError: If inherited or client-specific settings
+            cannot be validated.
+        ValueError: If the configured URL, endpoints, or timeout values are
+            invalid for the client constructor.
     """
-
     settings = get_prompt_cache_settings()
 
     return SyncPromptCacheClient(
@@ -554,5 +707,5 @@ def create_prompt_cache_client() -> SyncPromptCacheClient:
         get_job_endpoint=settings.PROMPT_CACHE_GET_JOB_ENDPOINT,
         request_timeout=settings.PROMPT_CACHE_REQUEST_TIMEOUT,
         poll_interval=settings.PROMPT_CACHE_POLL_INTERVAL,
-        poll_timeout=settings.PROMPT_CACHE_POLL_TIMEOUT,
+        operation_timeout=settings.PROMPT_CACHE_OPERATION_TIMEOUT,
     )
