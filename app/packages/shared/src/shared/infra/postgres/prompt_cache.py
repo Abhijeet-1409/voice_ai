@@ -1,47 +1,95 @@
+"""SQLAlchemy mapping for signature-based Gemini prompt caches.
+
+The legacy persistence helpers at the bottom of this module are temporary
+compatibility shims. They deliberately fail with an actionable message because
+their version-based arguments cannot identify a cache in the new signature-
+based schema. Remove those shims after all legacy callers have been migrated.
+"""
+
+from __future__ import annotations
+
 import uuid
 from datetime import datetime
+from typing import Any
+from uuid import UUID
 
-from sqlalchemy import String, DateTime, Integer, select, Result
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import DateTime, String, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from shared.config import PromptCacheType
-from shared.logging_setup import get_logger
 
 from .base import Base
-from .database import get_sync_sessionmaker, get_async_sessionmaker
 
 
-_LOGGER = "infra.postgres.prompt_cache"
+class LegacyPromptCacheAPIError(RuntimeError):
+    """Raised when a caller uses the retired version-based PromptCache API."""
 
 
 class PromptCache(Base):
-    """Store metadata for reusable Vertex AI context caches.
+    """Persist the identity and Gemini result of a reusable prompt cache.
 
-    Attributes:
-        id: Unique identifier for the prompt cache metadata record (UUID v4).
-        prompt_type: Type of prompt cache, such as inbound or outreach.
-        vertex_cache_name: Resource name of the cached content stored in Vertex AI.
-        model: Vertex AI model associated with the cached content.
-        location: GCP region where the cached content is created and managed.
-        system_instruction_version: Version of the system instructions used to create the cache.
-        voice_agent_guide_version: Version of the voice agent guide included in the cache.
-        created_at: Timestamp when the Vertex AI cache was created.
-        expires_at: Timestamp when the Vertex AI cache is scheduled to expire.
+    ``signature`` is the SHA-256 digest calculated by the Prompt Cache
+    Service from the canonical cache payload. ``payload`` contains the
+    cache-affecting input used to produce that signature. ``result`` remains
+    null until the provider successfully creates a cached-content resource.
+
+    ``prompt_cache_type`` is stored as the string value of the existing shared
+    ``PromptCacheType`` enum. This model intentionally does not define a second
+    enum or own database sessions/transactions.
     """
 
     __tablename__ = "prompt_caches"
 
-    id:                         Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    prompt_type:                Mapped[PromptCacheType] = mapped_column(String, nullable=False)
-    vertex_cache_name:          Mapped[str] = mapped_column(String, nullable=False)
-    model:                      Mapped[str] = mapped_column(String, nullable=False)
-    location:                   Mapped[str] = mapped_column(String, nullable=False)
-    system_instruction_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    voice_agent_guide_version:  Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at:                 Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    expires_at:                 Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    signature: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        unique=True,
+    )
+    prompt_cache_type: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+    )
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+    result: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
+
+def _raise_legacy_api_error() -> None:
+    raise LegacyPromptCacheAPIError(
+        "The version-based PromptCache helper API is no longer compatible "
+        "with the signature-based prompt_caches schema. Migrate this caller "
+        "to the Prompt Cache Service before enabling the schema migration."
+    )
+
+
+# Temporary shims: retain the old import names until the repository-wide
+# caller migration is complete. Do not use these functions for new code.
 def save_prompt_cache_sync(
     prompt_type: PromptCacheType,
     vertex_cache_name: str,
@@ -52,40 +100,8 @@ def save_prompt_cache_sync(
     created_at: datetime,
     expires_at: datetime,
 ) -> PromptCache:
-    """Synchronously persist metadata for a Vertex AI context cache."""
-
-    new_cache = PromptCache(
-        prompt_type=prompt_type,
-        vertex_cache_name=vertex_cache_name,
-        model=model,
-        location=location,
-        system_instruction_version=system_instruction_version,
-        voice_agent_guide_version=voice_agent_guide_version,
-        created_at=created_at,
-        expires_at=expires_at,
-    )
-
-    logger = get_logger(_LOGGER)
-    session_factory = get_sync_sessionmaker()
-
-    try:
-        with session_factory() as session:
-            session.add(new_cache)
-            session.commit()
-
-        logger.info(
-            f"Saved prompt cache metadata | "
-            f"cache_id={new_cache.id} | prompt_type={prompt_type} | model={model}"
-        )
-
-    except SQLAlchemyError:
-        logger.exception(
-            f"Failed to save prompt cache metadata | "
-            f"prompt_type={prompt_type} | model={model}"
-        )
-        raise
-
-    return new_cache
+    """Deprecated version-based API; retained temporarily for import stability."""
+    _raise_legacy_api_error()
 
 
 def get_prompt_cache_sync(
@@ -95,38 +111,9 @@ def get_prompt_cache_sync(
     system_instruction_version: int,
     voice_agent_guide_version: int,
 ) -> PromptCache | None:
-    """Retrieve the newest prompt cache record matching the supplied configuration."""
+    """Deprecated version-based API; retained temporarily for import stability."""
+    _raise_legacy_api_error()
 
-    logger = get_logger(_LOGGER)
-    session_factory = get_sync_sessionmaker()
-
-    try:
-        with session_factory() as session:
-            stmt = (
-                select(PromptCache)
-                .where(
-                    PromptCache.prompt_type == prompt_type,
-                    PromptCache.model == model,
-                    PromptCache.location == location,
-                    PromptCache.system_instruction_version
-                    == system_instruction_version,
-                    PromptCache.voice_agent_guide_version
-                    == voice_agent_guide_version,
-                )
-                .order_by(PromptCache.expires_at.desc())
-                .limit(1)
-            )
-            result: Result[PromptCache] = session.execute(stmt)
-            cache = result.scalars().first()
-            logger.debug(f"Retrieved matching prompt cache metadata: {cache}")
-            return cache
-
-    except SQLAlchemyError:
-        logger.exception(
-            f"Failed to retrieve prompt cache metadata | "
-            f"prompt_type={prompt_type} | model={model} | location={location}"
-        )
-        raise
 
 async def save_prompt_cache_async(
     prompt_type: PromptCacheType,
@@ -138,40 +125,8 @@ async def save_prompt_cache_async(
     created_at: datetime,
     expires_at: datetime,
 ) -> PromptCache:
-    """Asynchronously persist metadata for a Vertex AI context cache."""
-
-    new_cache = PromptCache(
-        prompt_type=prompt_type,
-        vertex_cache_name=vertex_cache_name,
-        model=model,
-        location=location,
-        system_instruction_version=system_instruction_version,
-        voice_agent_guide_version=voice_agent_guide_version,
-        created_at=created_at,
-        expires_at=expires_at,
-    )
-
-    logger = get_logger(_LOGGER)
-    session_factory = get_async_sessionmaker()
-
-    try:
-        async with session_factory() as session:
-            session.add(new_cache)
-            await session.commit()
-
-        logger.info(
-            f"Saved prompt cache metadata | "
-            f"cache_id={new_cache.id} | prompt_type={prompt_type} | model={model}"
-        )
-
-    except SQLAlchemyError:
-        logger.exception(
-            f"Failed to save prompt cache metadata | "
-            f"prompt_type={prompt_type} | model={model}"
-        )
-        raise
-
-    return new_cache
+    """Deprecated async version-based API; retained temporarily for import stability."""
+    _raise_legacy_api_error()
 
 
 async def get_prompt_cache_async(
@@ -181,35 +136,5 @@ async def get_prompt_cache_async(
     system_instruction_version: int,
     voice_agent_guide_version: int,
 ) -> PromptCache | None:
-    """Asynchronously retrieve the newest matching prompt cache record."""
-
-    logger = get_logger(_LOGGER)
-    session_factory = get_async_sessionmaker()
-
-    try:
-        async with session_factory() as session:
-            stmt = (
-                select(PromptCache)
-                .where(
-                    PromptCache.prompt_type == prompt_type,
-                    PromptCache.model == model,
-                    PromptCache.location == location,
-                    PromptCache.system_instruction_version
-                    == system_instruction_version,
-                    PromptCache.voice_agent_guide_version
-                    == voice_agent_guide_version,
-                )
-                .order_by(PromptCache.expires_at.desc())
-                .limit(1)
-            )
-            result = await session.execute(stmt)
-            cache = result.scalars().first()
-            logger.debug(f"Retrieved matching prompt cache metadata: {cache}")
-            return cache
-
-    except SQLAlchemyError:
-        logger.exception(
-            f"Failed to retrieve prompt cache metadata | "
-            f"prompt_type={prompt_type} | model={model} | location={location}"
-        )
-        raise
+    """Deprecated async version-based API; retained temporarily for import stability."""
+    _raise_legacy_api_error()
