@@ -13,12 +13,14 @@ from domain.tools import (
     qualify_lead,
     create_get_contact_info_tool,
     create_schedule_meeting_tool,
+    end_call,
 )
 
 
 COMMON_TOOLS: list[FunctionTool] = [
     search_knowledge_base,
     update_caller_info,
+    end_call,
 ]
 
 SUPPORT_TOOLS: list[FunctionTool] = [
