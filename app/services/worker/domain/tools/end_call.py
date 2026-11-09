@@ -8,69 +8,63 @@ async def end_call(
     ctx: RunContext,
     confirmation: Literal["request", "confirm", "cancel"] = "request",
 ) -> str:
-    """
-    End the current call only after the caller explicitly confirms.
+    """End the current call only after the caller explicitly confirms.
 
     Confirmation flow:
-    1. When the caller asks to end the call, call this tool with the default
-       confirmation="request". It records that confirmation is pending.
-    2. Ask the caller: "Are you sure you want me to end this call?"
-    3. If the caller clearly says yes, call this tool with confirmation="confirm".
-    4. If the caller says no, call this tool with confirmation="cancel".
+    1. When the caller asks to end the call, call this tool with
+       confirmation="request" (the default).
+    2. Ask: "Are you sure you want me to end this call?"
+    3. If the caller clearly says yes, call with confirmation="confirm".
+    4. If the caller says no, call with confirmation="cancel".
 
-    Do not use confirmation="confirm" unless the caller has explicitly said
-    yes after being asked for confirmation.
+    Never call with confirmation="confirm" unless the caller explicitly
+    confirms after being asked.
 
     Args:
-        ctx (RunContext): The LiveKit agent execution context.
-        confirmation (Literal["request", "confirm", "cancel"]):
-            "request" starts the confirmation loop.
-            "confirm" ends the call, but only if a confirmation is pending.
-            "cancel" clears a pending request and keeps the call active.
+        ctx: LiveKit function-tool context. Its userdata must be the per-call
+            UserData model containing end_call_confirmation_pending.
+        confirmation: "request" starts the confirmation flow; "confirm"
+            ends the call when confirmation is pending; "cancel" clears the
+            pending request and leaves the call active.
 
     Returns:
-        str: The result of the confirmation or call-ending operation.
+        A customer-facing instruction/result for the agent.
     """
-
-    # This field must be defined on the per-call UserData object.
-    pending = ctx.userdata.end_call_confirmation_pending
+    userdata = ctx.userdata
 
     if confirmation == "request":
-        ctx.userdata.end_call_confirmation_pending = True
+        userdata.end_call_confirmation_pending = True
         return (
-            "Call-ending confirmation is now pending. Ask the caller: "
-            "'Are you sure you want me to end this call?' "
-            "Do not end the call until the caller explicitly confirms."
+            "Call-ending confirmation is pending. Ask the caller: "
+            "'Are you sure you want me to end this call?' Do not end the call "
+            "until the caller explicitly confirms."
         )
 
     if confirmation == "cancel":
-        if not pending:
-            return "There is no pending call-ending confirmation."
+        if not userdata.end_call_confirmation_pending:
+            return "There is no pending call-ending confirmation. Continue the conversation normally."
 
-        ctx.userdata.end_call_confirmation_pending = False
+        userdata.end_call_confirmation_pending = False
         return "Call ending cancelled. Continue the conversation normally."
 
     # confirmation == "confirm"
-    if not pending:
+    if not userdata.end_call_confirmation_pending:
         return (
-            "There is no pending call-ending confirmation. "
-            "Do not end the call. If the caller still wants to leave, "
-            "start the confirmation process first."
+            "There is no pending call-ending confirmation. Do not end the call. "
+            "If the caller still wants to leave, ask for confirmation first."
         )
 
-    # Prevent the confirmation tool operation from being interrupted.
+    # Make the goodbye speech uninterruptible so the caller hears it before
+    # the session shutdown is requested.
     ctx.disallow_interruptions()
-
-    # Clear the flag before shutdown so the action cannot be repeated.
-    ctx.userdata.end_call_confirmation_pending = False
-
-    # Speak the goodbye and wait until it has finished playing.
     await ctx.session.say(
         "Thank you for calling. Goodbye.",
         allow_interruptions=False,
     )
 
-    # Request a graceful session shutdown after the goodbye has played.
+    # Clear the state after the goodbye has been delivered, then request a
+    # graceful shutdown. shutdown(drain=True) is non-blocking in LiveKit.
+    userdata.end_call_confirmation_pending = False
     ctx.session.shutdown(drain=True)
 
     return "The caller confirmed. The goodbye message was played and session shutdown was requested."

@@ -86,6 +86,11 @@ class UserData(BaseModel):
     meeting_scheduled: bool = False
     meeting_slot: Optional[str] = None
 
+    # --- Call termination confirmation state (per call) ---
+    # Set when the caller asks to end the call. The end_call tool requires
+    # explicit confirmation before shutting down the LiveKit session.
+    end_call_confirmation_pending: bool = False
+
     # --- Tool call log (accumulated in-memory, bulk-written on call end) ---
     tool_call_log: list[ToolCallRecord] = Field(default_factory=list)
 
@@ -94,7 +99,7 @@ class UserData(BaseModel):
     # cascaded pipeline is the current standard path; realtime is not yet
     # compatible with the Task-based email/meeting confirmation flow. ---
     is_realtime_model: bool = False
-    
+
     # --- Lifecycle ---
     end_reason: Optional[CloseReason] = None
     error_detail: Optional[str] = None
