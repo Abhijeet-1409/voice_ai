@@ -2,12 +2,13 @@ from . describe import describe, describe_all
 from .customer_utils import lookup_customer, create_customer, update_customer ,apply_contact_to_userdata
 from .meeting_scheduler import get_slots, confirm_booking
 from .prompt_context import (
-        build_user_context_block, 
-        build_instruction, 
+        build_user_context_block,
+        build_instruction,
         build_voice_agent_guide,
-        build_choose_slot_task_prompt, 
+        build_choose_slot_task_prompt,
         build_confirm_email_task_prompt
     )
+from .email_utils import send_meeting_confirmation_email
 
 __all__ = [
     "describe",
@@ -22,5 +23,6 @@ __all__ = [
     "build_instruction",
     "build_voice_agent_guide",
     "build_choose_slot_task_prompt",
-    "build_confirm_email_task_prompt"
+    "build_confirm_email_task_prompt",
+    "send_meeting_confirmation_email",
 ]
