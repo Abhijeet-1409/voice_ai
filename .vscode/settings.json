@@ -1,5 +1,6 @@
 {
     "python.analysis.extraPaths": [
-        "./app/packages/shared/src"
+        "./app/packages/shared/src",
+        "./app/packages/prompt_cache_client/src"
     ]
 }
