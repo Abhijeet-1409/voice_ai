@@ -252,11 +252,16 @@ async def entrypoint(ctx: JobContext) -> None:
         user_data.is_realtime_model = isinstance(session.llm, RealtimeModel)
 
         # register event handlers
-        register_event_handlers(
+        task_tracker = register_event_handlers(
             session=session,
             stream_sid=stream_sid,
             user_data=user_data,
         )
+
+        # LiveKit invokes shutdown callbacks as the job is shutting down.
+        # Wait briefly for transcript appends and end-of-call persistence so
+        # those tasks are not abandoned immediately after the session closes.
+        ctx.add_shutdown_callback(task_tracker.wait_for_completion)
 
         # start the session with noise cancellation enabled
         await session.start(
@@ -276,6 +281,11 @@ async def entrypoint(ctx: JobContext) -> None:
             # ),
         )
 
+    except asyncio.CancelledError:
+        logger.warning("LiveKit job entrypoint was cancelled")
+        raise
     except Exception:
-        logger.error("Error occurred in entrypoint", exc_info=True)
+        # Keep the original exception and traceback visible to LiveKit.
+        # Do not swallow startup failures or pretend that the call started.
+        logger.exception("LiveKit job startup/session entrypoint failed")
         raise
