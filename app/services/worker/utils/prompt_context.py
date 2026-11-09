@@ -6,21 +6,27 @@ from shared.logging_setup import get_logger
 from schemas import UserData
 from config import get_worker_settings
 from domain import (
-        OUTREACH_SYSTEM_PROMPT,
-        INBOUND_SYSTEM_PROMPT,
-        DEFAULT_SYSTEM_PROMPT,
-        TASK_IDENTITY_TEMPLATE,
-        SUPERVISOR_CONTEXT_TEMPLATE,
-        WORKFLOW_POSITION_TEMPLATE,
-        CONFIRM_EMAIL_TASK_PROMPT,
-        CHOOSE_SLOT_TASK_PROMPT,
-        OUTREACH_SYSTEM_PROMPT_V2,
-        INBOUND_SYSTEM_PROMPT_V2,
-        DEFAULT_SYSTEM_PROMPT_V2,
-        VOICE_AGENT_GUIDE,
-        VOICE_AGENT_GUIDE_V2
-    )
-
+    OUTREACH_SYSTEM_PROMPT,
+    INBOUND_SYSTEM_PROMPT,
+    DEFAULT_SYSTEM_PROMPT,
+    OUTREACH_SYSTEM_PROMPT_V2,
+    INBOUND_SYSTEM_PROMPT_V2,
+    DEFAULT_SYSTEM_PROMPT_V2,
+    OUTREACH_SYSTEM_PROMPT_V3,
+    INBOUND_SYSTEM_PROMPT_V3,
+    DEFAULT_SYSTEM_PROMPT_V3,
+    TASK_IDENTITY_TEMPLATE,
+    SUPERVISOR_CONTEXT_TEMPLATE,
+    WORKFLOW_POSITION_TEMPLATE,
+    CONFIRM_EMAIL_TASK_PROMPT,
+    CHOOSE_SLOT_TASK_PROMPT,
+    VOICE_AGENT_GUIDE,
+    VOICE_AGENT_GUIDE_V2,
+    AWS_PROGRAM_REFERENCE,
+    INBOUND_VOICE_AGENT_GUIDE,
+    OUTREACH_VOICE_AGENT_GUIDE,
+    DEFAULT_VOICE_AGENT_GUIDE,
+)
 
 _LOGGER = "worker.utils.prompt_context"
 logger = get_logger(_LOGGER)
@@ -28,98 +34,108 @@ logger = get_logger(_LOGGER)
 
 def build_instruction(
     call_type: Optional[CallType] = None,
-    version: Optional[Literal[1, 2]] = None,
+    version: Optional[Literal[1, 2, 3]] = None,
 ) -> str:
-    """
-    Constructs the system prompt instruction string based on the call type and prompt version.
+    """Build the system instruction for the requested call type and version.
 
-    Selects the appropriate prompt template (`OUTREACH_SYSTEM_PROMPT`,
-    `INBOUND_SYSTEM_PROMPT`, or `DEFAULT_SYSTEM_PROMPT`) based on the call type
-    and requested version. If the call type is None or does not match a supported
-    call type, the default prompt template is selected. The selected template is
-    populated with global application settings.
-
-    Args:
-        call_type (Optional[CallType]): The type of call used to select the prompt
-            template. Supports inbound and outreach calls. Defaults to None, which
-            selects the default prompt.
-        version (Optional[Literal[1, 2]]): The system prompt version to use.
-            Version 1 uses the original prompts, while version 2 uses the updated
-            prompts. Defaults to None, which selects version 1.
-
-    Returns:
-        str: The fully formatted system instruction prompt.
+    Version 3 is the default. Versions 1 and 2 remain available for rollback.
     """
     settings = get_worker_settings()
+    version = 3 if version is None else version
 
-    if version is None:
-        # Default to version 1 if not specified
-        version = 1
+    if version not in (1, 2, 3):
+        logger.warning(
+            "Invalid system instruction version %r; defaulting to version 3.",
+            version,
+        )
+        version = 3
 
-    if version not in (1, 2):
-        logger.warning(f"Invalid version '{version}' specified — defaulting to version 1.")
-        version = 1  # fallback to version 1 if invalid
+    templates = {
+        1: {
+            CallType.OUTREACH: OUTREACH_SYSTEM_PROMPT,
+            CallType.INBOUND: INBOUND_SYSTEM_PROMPT,
+            None: DEFAULT_SYSTEM_PROMPT,
+        },
+        2: {
+            CallType.OUTREACH: OUTREACH_SYSTEM_PROMPT_V2,
+            CallType.INBOUND: INBOUND_SYSTEM_PROMPT_V2,
+            None: DEFAULT_SYSTEM_PROMPT_V2,
+        },
+        3: {
+            CallType.OUTREACH: OUTREACH_SYSTEM_PROMPT_V3,
+            CallType.INBOUND: INBOUND_SYSTEM_PROMPT_V3,
+            None: DEFAULT_SYSTEM_PROMPT_V3,
+        },
+    }
 
-    match call_type:
-        case CallType.OUTREACH:
-            if version == 1:
-                prompt_template = OUTREACH_SYSTEM_PROMPT
-            else:
-                prompt_template = OUTREACH_SYSTEM_PROMPT_V2
+    prompt_template = templates[version].get(call_type)
 
-        case CallType.INBOUND:
-            if version == 1:
-                prompt_template = INBOUND_SYSTEM_PROMPT
-            else:
-                prompt_template = INBOUND_SYSTEM_PROMPT_V2
+    if prompt_template is None:
+        logger.warning(
+            "Unrecognized call_type=%r; using the DEFAULT system prompt.",
+            call_type,
+        )
+        prompt_template = templates[version][None]
 
-        case _:
-            logger.warning(f"Unrecognized call_type='{call_type}' — falling back to DEFAULT_PROMPT.")
-            if version == 1:
-                prompt_template = DEFAULT_SYSTEM_PROMPT
-            else:
-                prompt_template = DEFAULT_SYSTEM_PROMPT_V2
-
-    instructions = prompt_template.format(
+    return prompt_template.format(
         agent_name=settings.AGENT_NAME,
         company_name=settings.COMPANY_NAME,
     )
 
-    return instructions
 
+def build_voice_agent_guide(
+    enum_reference: str,
+    version: Optional[Literal[1, 2, 3]] = None,
+    call_type: Optional[CallType] = None,
+) -> str:
+    """Build the business guide for one call type.
 
-def build_voice_agent_guide(enum_reference: str, version: Optional[Literal[1, 2]] = None) -> str:
-    """Builds and formats the voice agent instruction guide for a specific version.
-
-    Args:
-        enum_reference: The string representation of the enum reference value
-            to be interpolated into the prompt template.
-        version: The guide template version to use. Options are 1 or 2.
-            If None or invalid, defaults to version 1.
-
-    Returns:
-        The formatted voice agent guide string containing company settings
-        and enum references.
+    Versions 1 and 2 preserve their historical single-guide behaviour.
+    Version 3 selects exactly one call-type-specific guide and injects
+    the runtime enum reference into that guide.
     """
     settings = get_worker_settings()
+    version = 3 if version is None else version
 
-    if version is None:
-        # Default to version 1 if not specified
-        version = 1
-
-    if version not in (1, 2):
-        logger.warning(f"Invalid version '{version}' specified — defaulting to version 1.")
-        version = 1  # fallback to version 1 if invalid
+    if version not in (1, 2, 3):
+        logger.warning(
+            "Invalid voice guide version %r; defaulting to version 3.",
+            version,
+        )
+        version = 3
 
     if version == 1:
         guide = VOICE_AGENT_GUIDE
-    else:
+        return guide.format(
+            company_name=settings.COMPANY_NAME,
+            enum_reference=enum_reference,
+        )
+
+    if version == 2:
         guide = VOICE_AGENT_GUIDE_V2
+        return guide.format(
+            company_name=settings.COMPANY_NAME,
+            enum_reference=enum_reference,
+        )
+
+    match call_type:
+        case CallType.INBOUND:
+            guide = INBOUND_VOICE_AGENT_GUIDE
+        case CallType.OUTREACH:
+            guide = OUTREACH_VOICE_AGENT_GUIDE
+        case _:
+            logger.warning(
+                "Unrecognized call_type=%r; using DEFAULT V3 guide.",
+                call_type,
+            )
+            guide = DEFAULT_VOICE_AGENT_GUIDE
 
     return guide.format(
         company_name=settings.COMPANY_NAME,
         enum_reference=enum_reference,
+        aws_program_reference=AWS_PROGRAM_REFERENCE,
     )
+
 
 def build_user_context_block(userdata: UserData) -> str:
     """
@@ -127,17 +143,8 @@ def build_user_context_block(userdata: UserData) -> str:
     injection into the {user_context} placeholder in domain/system_prompt.py's
     prompt templates.
 
-    Always includes every field (using "Unknown"/"Not yet determined" for
-    unset values) rather than conditionally omitting empty fields — see
-    design decision: a fixed, predictable shape every call is preferred
-    over variable-length output, and explicit placeholders avoid raw
-    "None" strings leaking into the prompt.
-
-    Args:
-        userdata: The current call's UserData.
-
-    Returns:
-        A formatted multi-line string ready to fill {user_context}.
+    Always includes every field, using "Unknown" or "Not yet determined"
+    for unset values.
     """
     return (
         f"Customer_id: {userdata.customer_id or 'Unknown'}\n"
@@ -249,9 +256,8 @@ def build_choose_slot_task_prompt(
     """
     Render the complete ChooseSlotTask prompt.
 
-    The actual available meeting slots are intentionally NOT injected here.
-    They are runtime state and should be fetched and injected by
-    ChooseSlotTask.on_enter().
+    Actual available meeting slots are runtime state and should be fetched
+    and injected by ChooseSlotTask.on_enter().
     """
     return (
         build_task_identity(
