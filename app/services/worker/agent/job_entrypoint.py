@@ -24,6 +24,15 @@ from .event_handlers import register_event_handlers
 from .prompt_cache import create_prompt_cache
 from utils import lookup_customer, build_user_context_block, build_instruction, build_voice_agent_guide
 
+# Prompt Cache Client integration imports.
+# Uncomment these when enabling the service-backed cache flow:
+#
+# from livekit.agents import ToolContext
+# from shared.config import PromptCacheType
+# from prompt_cache_client.adapters.async_client import (
+#     create_async_prompt_cache_client,
+# )
+
 
 _LOGGER = "worker.agent.entrypoint"
 logger = get_logger(_LOGGER)
@@ -121,16 +130,22 @@ async def entrypoint(ctx: JobContext) -> None:
         user_context_block = build_user_context_block(user_data)
 
         # create system instruction
-        system_instructions = build_instruction(user_data.call_type, version=settings.SYSTEM_INSTRUCTION_VERSION)
+        system_instructions = build_instruction(
+            user_data.call_type,
+            version=settings.SYSTEM_INSTRUCTION_VERSION,
+        )
 
-        # create voice guide content n
+        # create voice guide content
         enum_reference = describe_all(
             Track,
             TicketPriority,
             TicketStatus,
         )
 
-        voice_agent_guide = build_voice_agent_guide(enum_reference, version=settings.VOICE_AGENT_GUIDE_VERSION)
+        voice_agent_guide = build_voice_agent_guide(
+            enum_reference,
+            version=settings.VOICE_AGENT_GUIDE_VERSION,
+        )
 
         combined_system_instruction = f"{system_instructions}\n\n{voice_agent_guide}"
 
@@ -159,9 +174,66 @@ async def entrypoint(ctx: JobContext) -> None:
         )
 
         # build agent with system instruction and chat context
-        agent = build_agent(user_data, combined_system_instruction, chat_ctx=chat_ctx, task_llm = task_llm)
+        agent = build_agent(
+            user_data,
+            combined_system_instruction,
+            chat_ctx=chat_ctx,
+            task_llm=task_llm,
+        )
 
-        # create cached_content
+        # ------------------------------------------------------------------
+        # FUTURE PROMPT CACHE CLIENT INTEGRATION (currently disabled)
+        #
+        # When enabling the Prompt Cache Service, replace the local
+        # create_prompt_cache() call below with this block.
+        #
+        # The async client performs:
+        #   1. Cache lookup.
+        #   2. Job submission on a cache miss.
+        #   3. Job-status polling until completion.
+        #
+        # It returns a CacheResult. Its cache_name is passed to
+        # create_agent_session() as cached_content.
+        #
+        # cache_type = {
+        #     CallType.INBOUND: PromptCacheType.INBOUND_PROMPT_CACHE,
+        #     CallType.OUTREACH: PromptCacheType.OUTBOUND_PROMPT_CACHE,
+        # }.get(user_data.call_type, PromptCacheType.DEFAULT_PROMPT_CACHE)
+        #
+        # tool_ctx = ToolContext(tools=agent.tools)
+        # tool_schema = tool_ctx.parse_function_tools(format="google")
+        #
+        # cache_payload = {
+        #     "prompt_cache_type": cache_type,
+        #     "instruction": system_instructions,
+        #     "voice_agent_guide": voice_agent_guide,
+        #     "tool_schema": tool_schema,
+        # }
+        #
+        # try:
+        #     cache_result = await create_async_prompt_cache_client().create(
+        #         cache_payload
+        #     )
+        #     cached_content = cache_result.cache_name
+        #     logger.info(
+        #         "Prompt cache resolved for call_type=%s "
+        #         "(cache_name=%s, reused=%s).",
+        #         user_data.call_type.value,
+        #         cache_result.cache_name,
+        #         cache_result.reused,
+        #     )
+        # except Exception:
+        #     # Fail open: a cache-service failure must not prevent the call.
+        #     # Passing None lets the agent session use uncached instructions.
+        #     logger.exception(
+        #         "Prompt-cache service unavailable for call_type=%s. "
+        #         "Continuing without cached content.",
+        #         user_data.call_type.value,
+        #     )
+        #     cached_content = None
+        # ------------------------------------------------------------------
+
+        # create cached_content locally (existing implementation remains active)
         cached_content = await asyncio.to_thread(
             create_prompt_cache,
             user_data,
@@ -180,7 +252,11 @@ async def entrypoint(ctx: JobContext) -> None:
         user_data.is_realtime_model = isinstance(session.llm, RealtimeModel)
 
         # register event handlers
-        register_event_handlers(session=session,stream_sid=stream_sid,user_data=user_data)
+        register_event_handlers(
+            session=session,
+            stream_sid=stream_sid,
+            user_data=user_data,
+        )
 
         # start the session with noise cancellation enabled
         await session.start(
@@ -192,15 +268,14 @@ async def entrypoint(ctx: JobContext) -> None:
                 ),
                 text_output=room_io.TextOutputOptions(
                     # output_language=output_language,
-                    sync_transcription=True
+                    sync_transcription=True,
                 ),
             ),
             # audio_output=room_io.AudioOutputOptions(
             #     # output_language=output_language,
             # ),
-
         )
 
-    except Exception as e:
+    except Exception:
         logger.error("Error occurred in entrypoint", exc_info=True)
         raise
