@@ -4,6 +4,8 @@ from livekit.agents import ToolContext
 from shared.logging_setup import get_logger
 from shared.config import CallType, Track, TicketStatus, TicketPriority, PromptCacheType
 
+from prompt_cache_client.adapters.sync_client import create_prompt_cache_client
+
 from agent import entrypoint as _entrypoint
 from config import get_worker_settings
 from schemas import ToolDependencies
@@ -27,7 +29,7 @@ logger = get_logger(_LOGGER)
 server = AgentServer(
     api_key=settings.LIVEKIT_API_KEY,
     api_secret=settings.LIVEKIT_API_SECRET,
-    ws_url=settings.LIVEKIT_URL
+    ws_url=settings.LIVEKIT_URL,
 )
 
 
@@ -82,55 +84,60 @@ if __name__ == "__main__":
         TicketStatus,
     )
 
-    voice_agent_guide = build_voice_agent_guide(enum_reference, settings.VOICE_AGENT_GUIDE_VERSION)
+    voice_agent_guide = build_voice_agent_guide(
+        enum_reference,
+        settings.VOICE_AGENT_GUIDE_VERSION,
+    )
 
     tool_dependencies = ToolDependencies(
         agent_name=settings.AGENT_NAME,
-        company_name=settings.COMPANY_NAME
+        company_name=settings.COMPANY_NAME,
     )
 
     cache_call_map = {
         PromptCacheType.INBOUND_PROMPT_CACHE: CallType.INBOUND,
         PromptCacheType.OUTBOUND_PROMPT_CACHE: CallType.OUTREACH,
-        PromptCacheType.DEFAULT_PROMPT_CACHE: None
+        PromptCacheType.DEFAULT_PROMPT_CACHE: None,
     }
-
-    # Sync prompt cache client object creation will be add here
-
 
     for cache_type, call_type in cache_call_map.items():
         instruction = build_instruction(
             call_type=call_type,
-            version=settings.SYSTEM_INSTRUCTION_VERSION
+            version=settings.SYSTEM_INSTRUCTION_VERSION,
         )
 
         tool_list = select_tools(tool_dependencies, call_type)
 
-        tool_ctx = ToolContext(tools = tool_list)
-        tool_schema = tool_ctx.parse_function_tools(format='google')
+        tool_ctx = ToolContext(tools=tool_list)
+        tool_schema = tool_ctx.parse_function_tools(format="google")
 
         payload = {
             "prompt_cache_type": cache_type,
             "instruction": instruction,
             "voice_agent_guide": voice_agent_guide,
-            "tool_schema": tool_schema
+            "tool_schema": tool_schema,
         }
 
         try:
-            # TODO: Once the synchronous prompt-cache client is implemented,
-            # send `payload` to the service here. Keep the request inside this
-            # try block so failures can be logged per cache type.
+            # The client is intentionally created inside the loop because each
+            # client instance is designed for exactly one create() operation.
+            # create() performs lookup, submits a job on a miss, polls until
+            # completion, and closes its underlying HTTPX client.
+            cache_result = create_prompt_cache_client().create(payload)
+
             logger.info(
-                "Prepared prompt-cache request data for cache_type=%s "
-                "(instruction_chars=%d, guide_chars=%d, tool_count=%d).",
+                "Prompt cache is ready for cache_type=%s "
+                "(cache_name=%s, reused=%s).",
                 cache_type.value,
-                len(instruction),
-                len(voice_agent_guide),
-                len(tool_list),
+                cache_result.cache_name,
+                cache_result.reused,
             )
         except Exception:
+            # Cache prewarming must not prevent the LiveKit worker from starting.
+            # Calls can still run without a pre-created cache.
             logger.exception(
-                "Failed to prepare prompt-cache data for cache_type=%s.",
+                "Prompt-cache prewarming failed for cache_type=%s. "
+                "The worker will continue starting.",
                 cache_type.value,
             )
 
