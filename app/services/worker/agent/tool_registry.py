@@ -14,6 +14,7 @@ from domain.tools import (
     create_get_contact_info_tool,
     create_schedule_meeting_tool,
     end_call,
+    send_meeting_email,
 )
 
 
@@ -21,6 +22,7 @@ COMMON_TOOLS: list[FunctionTool] = [
     search_knowledge_base,
     update_caller_info,
     end_call,
+    send_meeting_email
 ]
 
 SUPPORT_TOOLS: list[FunctionTool] = [
