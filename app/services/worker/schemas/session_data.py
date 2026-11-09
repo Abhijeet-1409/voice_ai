@@ -86,6 +86,10 @@ class UserData(BaseModel):
     meeting_scheduled: bool = False
     meeting_slot: Optional[str] = None
 
+    # Meeting confirmation email state (per call/session)
+    meeting_email_sent: bool = False
+    meeting_email_sending: bool = False
+
     # --- Call termination confirmation state (per call) ---
     # Set when the caller asks to end the call. The end_call tool requires
     # explicit confirmation before shutting down the LiveKit session.
