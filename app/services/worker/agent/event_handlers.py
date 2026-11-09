@@ -1,23 +1,21 @@
 import asyncio
 from datetime import datetime, timezone
 from functools import partial
+from typing import Coroutine, Any
 
 from livekit.agents.voice import (
     ConversationItemAddedEvent,
-    UserInputTranscribedEvent,
     CloseEvent,
     ErrorEvent,
     FunctionToolsExecutedEvent,
 )
 from livekit.agents.llm.chat_context import ChatMessage
-from livekit.agents.language import LanguageCode
 from livekit.agents import AgentSession
 
 from shared.logging_setup import get_logger
 from shared.infra.redis import append_turn, get_transcript, delete_transcript
 from shared.infra.postgres import save_call_log, save_transcript, save_tool_log
 
-from speech import OutputLanguage
 from schemas import UserData, ToolCallRecord
 from utils import create_customer, update_customer
 
@@ -26,46 +24,122 @@ _LOGGER = "worker.agent.event_handlers"
 logger = get_logger(_LOGGER)
 
 
-# ── Background task exception handling ─────────────────────────────────────────
-# asyncio.create_task() silently swallows exceptions unless the returned Task's
-# result/exception is retrieved somewhere. Since these tasks are fire-and-forget
-# (nothing ever awaits or checks them directly), a done-callback is the only way
-# to surface a failure — without it, a bug here would fail completely silently.
+class BackgroundTaskTracker:
+    """Tracks per-call background work so shutdown can wait for it.
 
-def _log_task_exception(task: asyncio.Task, *, context: str) -> None:
+    Tasks are still asynchronous and do not block LiveKit event callbacks.
+    Their exceptions are always retrieved and logged. The tracker is created
+    once per call, rather than using a process-global task collection.
     """
-    Done-callback for fire-and-forget asyncio.create_task() calls.
-    Logs any exception the task raised, since nothing else observes it.
-    """
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc is not None:
-        logger.error(f"Background task failed [{context}]: {exc}", exc_info=exc)
 
+    def __init__(self, stream_sid: str) -> None:
+        self.stream_sid = stream_sid
+        self._tasks: set[asyncio.Task] = set()
+        self._transcript_append_tasks: set[asyncio.Task] = set()
+        self._cleanup_started = False
 
-def _create_tracked_task(coro, *, context: str) -> asyncio.Task:
-    """
-    Wraps asyncio.create_task() with a done-callback so exceptions in
-    fire-and-forget tasks are logged instead of silently swallowed.
-    """
-    task = asyncio.create_task(coro)
-    task.add_done_callback(lambda t: _log_task_exception(t, context=context))
-    return task
+    def create_task(
+        self,
+        coroutine: Coroutine[Any, Any, Any],
+        *,
+        context: str,
+        transcript_append: bool = False,
+    ) -> asyncio.Task:
+        task = asyncio.create_task(coroutine, name=f"{context}:{self.stream_sid}")
+        self._tasks.add(task)
+        if transcript_append:
+            self._transcript_append_tasks.add(task)
+        task.add_done_callback(partial(self._on_task_done, context=context))
+        return task
+
+    def _on_task_done(self, task: asyncio.Task, *, context: str) -> None:
+        self._tasks.discard(task)
+        self._transcript_append_tasks.discard(task)
+        if task.cancelled():
+            logger.warning(
+                "Background task was cancelled [stream_sid=%s context=%s]",
+                self.stream_sid,
+                context,
+            )
+            return
+
+        # Retrieving the exception prevents 'Task exception was never retrieved'.
+        exception = task.exception()
+        if exception is not None:
+            logger.error(
+                "Background task failed [stream_sid=%s context=%s]",
+                self.stream_sid,
+                context,
+                exc_info=(type(exception), exception, exception.__traceback__),
+            )
+
+    def start_call_cleanup(self, userdata: UserData) -> None:
+        """Schedule end-of-call writes once, even if close is emitted twice."""
+        if self._cleanup_started:
+            logger.warning(
+                "Ignoring duplicate call cleanup request [stream_sid=%s]",
+                self.stream_sid,
+            )
+            return
+
+        self._cleanup_started = True
+        self.create_task(
+            self._finish_call_cleanup(userdata),
+            context="end_of_call_writes",
+        )
+
+    async def _finish_call_cleanup(self, userdata: UserData) -> None:
+        # A close event can arrive while Redis append operations from the last
+        # conversation events are still running. Let those writes finish before
+        # reading the transcript for the final Postgres flush.
+        pending_appends = set(self._transcript_append_tasks)
+        if pending_appends:
+            await asyncio.gather(*pending_appends, return_exceptions=True)
+        await _end_of_call_writes(self.stream_sid, userdata)
+
+    async def wait_for_completion(self, timeout: float = 8.0) -> None:
+        """Wait briefly for tracked work during LiveKit job shutdown.
+
+        The timeout leaves headroom for LiveKit's own shutdown deadline. Work
+        that cannot finish in that window is reported rather than silently
+        abandoned. No retry or recovery is attempted here.
+        """
+        if not self._tasks:
+            return
+
+        logger.info(
+            "Waiting for %d background task(s) [stream_sid=%s]",
+            len(self._tasks),
+            self.stream_sid,
+        )
+
+        _, pending = await asyncio.wait(
+            set(self._tasks),
+            timeout=timeout,
+            return_when=asyncio.ALL_COMPLETED,
+        )
+
+        if pending:
+            pending_contexts = [task.get_name() for task in pending]
+            logger.error(
+                "Background cleanup did not finish before shutdown timeout "
+                "[stream_sid=%s pending=%s]",
+                self.stream_sid,
+                pending_contexts,
+            )
+            # Do not cancel these tasks here: cancellation during a database
+            # write could interrupt a transaction. LiveKit/process shutdown
+            # will ultimately own the remaining task lifetime.
 
 
 # ── Transcript handler ────────────────────────────────────────────────────────
 
 def on_conversation_item_added(
     event: ConversationItemAddedEvent,
-    stream_sid: str
+    stream_sid: str,
+    task_tracker: BackgroundTaskTracker,
 ) -> None:
-    """
-    Fires on every new conversation item (agent or caller utterance).
-    Appends the turn to the Redis transcript for this call.
-    Only processes ChatMessage items with text content — ignores tool
-    calls, system messages, and any non-text content.
-    """
+    """Append textual conversation messages to the Redis call transcript."""
     if not isinstance(event.item, ChatMessage):
         return
 
@@ -73,115 +147,92 @@ def on_conversation_item_added(
     if not transcription:
         return
 
-    role = str(event.item.role)
-    _create_tracked_task(
+    task_tracker.create_task(
         append_turn(
             stream_sid=stream_sid,
-            speaker=role,
-            text=transcription
+            speaker=str(event.item.role),
+            text=transcription,
         ),
-        context=f"append_turn stream_sid={stream_sid}",
+        context="append_transcript_turn",
+        transcript_append=True,
     )
-
-
-# # ── User language detector handler ────────────────────────────────────────────
-# def on_user_input_transcribed(
-#     event: UserInputTranscribedEvent,
-#     output_language: OutputLanguage | None = None,
-# ) -> None:
-#     """
-#     Handles transcription events for incoming user input and updates the target
-#     output language when a final transcription has a detected language.
-#     """
-#     if output_language is None:
-#         logger.warning(
-#             f"User input transcribed event received but no output language "
-#             f"controller is configured"
-#         )
-#         return
-
-#     if not event.is_final:
-#         return
-
-#     if event.language is None:
-#         logger.warning(
-#             f"User input transcribed event received but no language was detected"
-#         )
-#         return
-
-#     language_code: LanguageCode = event.language
-#     current_language = output_language.get_language()
-#     new_language = language_code.language
-
-#     if current_language == new_language:
-#         logger.debug(
-#             f"Detected language '{new_language}' matches current output language"
-#         )
-#         return
-
-#     try:
-#         output_language.set_language(new_language)
-
-#         logger.info(
-#             f"Output language updated from '{current_language}' "
-#             f"to '{new_language}'"
-#         )
-
-#     except ValueError as val_err:
-#         logger.error(
-#             f"Failed to update output language to '{new_language}' "
-#             f"from detected user input: {val_err}"
-#         )
-
-#     except Exception:
-#         logger.exception(
-#             f"Unexpected error while updating output language to "
-#             f"'{new_language}' from detected user input"
-#         )
 
 
 # ── Tool call handler ─────────────────────────────────────────────────────────
 
 def on_function_tools_executed(
     event: FunctionToolsExecutedEvent,
-    userdata: UserData
+    userdata: UserData,
+    stream_sid: str,
 ) -> None:
-    """
-    Fires after every batch of tool calls completes.
-    Accumulates each tool call as a ToolCallRecord on userdata.tool_call_log
-    for bulk write to Postgres at call end. Does NOT write to Postgres here —
-    the call is still live and the event handler must not block.
-    """
-    for call, output in zip(event.function_calls, event.function_call_outputs):
-        record = ToolCallRecord(
-            tool_name=call.name,
-            arguments=call.arguments if isinstance(call.arguments, dict) else {},
-            result=output.output,
-            is_error=output.is_error,
-            error_message=output.output if output.is_error else None,
+    """Keep tool execution records in memory for persistence after the call."""
+    calls = event.function_calls
+    outputs = event.function_call_outputs
+
+    if len(calls) != len(outputs):
+        logger.warning(
+            "Tool call/output count mismatch [stream_sid=%s calls=%d outputs=%d]",
+            stream_sid,
+            len(calls),
+            len(outputs),
         )
-        userdata.tool_call_log.append(record)
-        logger.debug(
-            f"Tool call recorded — tool={call.name} "
-            f"is_error={output.is_error}"
-        )
+
+    for call, output in zip(calls, outputs):
+        try:
+            record = ToolCallRecord(
+                tool_name=call.name,
+                arguments=call.arguments if isinstance(call.arguments, dict) else {},
+                result=output.output,
+                is_error=output.is_error,
+                error_message=output.output if output.is_error else None,
+            )
+            userdata.tool_call_log.append(record)
+        except Exception:
+            logger.exception(
+                "Could not record tool execution [stream_sid=%s tool=%s]",
+                stream_sid,
+                getattr(call, "name", "unknown"),
+            )
 
 
 # ── Error handler ─────────────────────────────────────────────────────────────
 
-def on_error(
-    event: ErrorEvent,
-    stream_sid: str
-) -> None:
+def on_error(event: ErrorEvent, stream_sid: str, userdata: UserData) -> None:
+    """Record LiveKit component errors without changing session behavior.
+
+    This handler intentionally does not retry, recreate providers, or close
+    the call. LiveKit's CloseEvent remains the source of call-end metadata.
     """
-    Fires on session-level errors (STT / LLM / TTS / realtime model failures).
-    Logs the error. Does not raise — a crash here could interfere with
-    cleanup.
-    """
-    logger.error(
-        f"Session error [stream_sid={stream_sid}] "
-        f"source={event.source} error={event.error}"
+    error = event.error
+    recoverable = getattr(error, "recoverable", None)
+    source = event.source
+
+    # Preserve the latest component error on the call record. A later
+    # CloseEvent with its own error will replace this with the terminal error.
+    userdata.error_detail = (
+        f"source={source}; recoverable={recoverable}; "
+        f"type={type(error).__name__}; error={error}"
     )
+
+    log_message = (
+        "LiveKit session error [stream_sid=%s source=%s recoverable=%s "
+        "error_type=%s error=%s]"
+    )
+    log_args = (
+        stream_sid,
+        source,
+        recoverable,
+        type(error).__name__,
+        error,
+    )
+
+    if recoverable is False:
+        logger.error(log_message, *log_args)
+    elif recoverable is True:
+        logger.warning(log_message, *log_args)
+    else:
+        # Some event/error implementations may not expose recoverable.
+        logger.error(log_message, *log_args)
 
 
 # ── Close handler ─────────────────────────────────────────────────────────────
@@ -189,71 +240,46 @@ def on_error(
 def on_close(
     event: CloseEvent,
     stream_sid: str,
-    userdata: UserData
+    userdata: UserData,
+    task_tracker: BackgroundTaskTracker,
 ) -> None:
-    """
-    Fires when the session closes (caller hangs up, timeout, or error).
-    Stamps end metadata onto userdata and schedules the bulk end-of-call
-    write as a background task so the handler itself does not block shutdown.
-    """
+    """Capture final call metadata and schedule persistence exactly once."""
     userdata.end_reason = event.reason
-    userdata.end_at = datetime.fromtimestamp(
-        event.created_at, tz=timezone.utc
-    )
+    userdata.end_at = datetime.fromtimestamp(event.created_at, tz=timezone.utc)
 
     if event.error is not None:
         userdata.error_detail = str(event.error)
 
     logger.info(
-        f"Session closed [stream_sid={stream_sid}] "
-        f"reason={event.reason} error={event.error}"
+        "LiveKit session closed [stream_sid=%s reason=%s error=%s]",
+        stream_sid,
+        event.reason,
+        event.error,
     )
-
-    _create_tracked_task(
-        _end_of_call_writes(stream_sid, userdata),
-        context=f"_end_of_call_writes stream_sid={stream_sid}",
-    )
+    task_tracker.start_call_cleanup(userdata)
 
 
-# ── End-of-call bulk write ────────────────────────────────────────────────────
+# ── Independent persistence operations ───────────────────────────────────────
 
-async def _end_of_call_writes(stream_sid: str, userdata: UserData) -> None:
-    """
-    Runs as a background task after the session closes.
-    Order:
-      1. CRM create or update (deferred from mid-call)
-      2. Post-call follow-up email (TODO — not yet implemented)
-      3. save_call_log
-      4. save_transcript (flush Redis → Postgres)
-      5. save_tool_log (bulk write accumulated ToolCallRecords)
-
-    All steps are non-raising — a failure in any one step is logged and
-    execution continues so the remaining steps still run.
-    """
-
-    # ── 1. CRM write ──────────────────────────────────────────────────────────
+async def _persist_crm(userdata: UserData, stream_sid: str) -> None:
     try:
         if userdata.customer_id is None:
             await create_customer(userdata)
         else:
             await update_customer(userdata)
-    except Exception as e:
-        logger.error(
-            f"CRM write failed at call end [stream_sid={stream_sid}]: {e}"
-        )
+    except Exception:
+        logger.exception("CRM persistence failed [stream_sid=%s]", stream_sid)
 
-    # ── 2. Post-call follow-up email ──────────────────────────────────────────
-    # TODO: send post-call follow-up email once email_sender util is built
-    # if userdata.email and userdata.meeting_scheduled:
-    #     await send_followup_email(
-    #         to_email=userdata.email,
-    #         recipient_name=userdata.name,
-    #         track=userdata.track,
-    #         meeting_slot=userdata.meeting_slot,
-    #     )
 
-    # ── 3. save_call_log ──────────────────────────────────────────────────────
+async def _persist_call_log(userdata: UserData, stream_sid: str) -> None:
     try:
+        duration_secs = None
+        if userdata.end_at and userdata.started_at:
+            duration_secs = max(
+                0,
+                int((userdata.end_at - userdata.started_at).total_seconds()),
+            )
+
         await save_call_log(
             started_at=userdata.started_at,
             channel=userdata.channel,
@@ -264,36 +290,32 @@ async def _end_of_call_writes(stream_sid: str, userdata: UserData) -> None:
             user_id=userdata.user_id,
             ended_at=userdata.end_at,
             end_reason=str(userdata.end_reason) if userdata.end_reason else None,
-            duration_secs=(
-                int((userdata.end_at - userdata.started_at).total_seconds())
-                if userdata.end_at and userdata.started_at
-                else None
-            ),
+            duration_secs=duration_secs,
             qualification_summary=userdata.qualification_summary,
         )
-    except Exception as e:
-        logger.error(
-            f"save_call_log failed [stream_sid={stream_sid}]: {e}"
-        )
+    except Exception:
+        logger.exception("Call-log persistence failed [stream_sid=%s]", stream_sid)
 
-    # ── 4. save_transcript ────────────────────────────────────────────────────
+
+async def _persist_transcript(stream_sid: str) -> None:
+    """Move transcript to Postgres; only delete Redis data after save succeeds."""
     try:
         turns = await get_transcript(stream_sid)
-        if turns:
-            await save_transcript(stream_sid=stream_sid, turns=turns)
-            await delete_transcript(stream_sid)
-        else:
-            logger.warning(
-                f"No transcript turns found [stream_sid={stream_sid}]"
-            )
-    except Exception as e:
-        logger.error(
-            f"save_transcript failed [stream_sid={stream_sid}]: {e}"
-        )
+        if not turns:
+            logger.info("No transcript turns to persist [stream_sid=%s]", stream_sid)
+            return
 
-    # ── 5. save_tool_log ──────────────────────────────────────────────────────
-    try:
-        for record in userdata.tool_call_log:
+        await save_transcript(stream_sid=stream_sid, turns=turns)
+        await delete_transcript(stream_sid)
+        logger.info("Transcript persisted [stream_sid=%s turns=%d]", stream_sid, len(turns))
+    except Exception:
+        logger.exception("Transcript persistence failed [stream_sid=%s]", stream_sid)
+
+
+async def _persist_tool_logs(userdata: UserData, stream_sid: str) -> None:
+    """Persist each tool record independently so one failure doesn't stop others."""
+    for index, record in enumerate(userdata.tool_call_log):
+        try:
             await save_tool_log(
                 stream_sid=stream_sid,
                 tool_name=record.tool_name,
@@ -303,36 +325,65 @@ async def _end_of_call_writes(stream_sid: str, userdata: UserData) -> None:
                 is_error=record.is_error,
                 error_message=record.error_message,
             )
-    except Exception as e:
-        logger.error(
-            f"save_tool_log failed [stream_sid={stream_sid}]: {e}"
-        )
+        except Exception:
+            logger.exception(
+                "Tool-log persistence failed [stream_sid=%s index=%d tool=%s]",
+                stream_sid,
+                index,
+                record.tool_name,
+            )
 
-    logger.info(f"End-of-call writes complete [stream_sid={stream_sid}]")
+
+async def _end_of_call_writes(stream_sid: str, userdata: UserData) -> None:
+    """Persist call-end data; each category is isolated from the others."""
+    logger.info("Starting end-of-call persistence [stream_sid=%s]", stream_sid)
+
+    # Keep these operations sequential. The repository helpers may share an
+    # async database engine/session infrastructure, and AsyncSession instances
+    # must not be used concurrently. Each helper catches its own exception, so
+    # a failure in one category does not prevent the next category from running.
+    await _persist_crm(userdata, stream_sid)
+    await _persist_call_log(userdata, stream_sid)
+    await _persist_transcript(stream_sid)
+    await _persist_tool_logs(userdata, stream_sid)
+
+    logger.info("End-of-call persistence finished [stream_sid=%s]", stream_sid)
 
 
-# ── Register Event handlers ─────────────────────────────────────────────────────────────
+# ── Event registration ────────────────────────────────────────────────────────
 
-def register_event_handlers(session: AgentSession, stream_sid: str, user_data: UserData): 
-    """
-    """
+def register_event_handlers(
+    session: AgentSession,
+    stream_sid: str,
+    user_data: UserData,
+) -> BackgroundTaskTracker:
+    """Register call event handlers and return the per-call task tracker."""
+    task_tracker = BackgroundTaskTracker(stream_sid)
+
     session.on(
         "conversation_item_added",
-        partial(on_conversation_item_added, stream_sid=stream_sid),
+        partial(
+            on_conversation_item_added,
+            stream_sid=stream_sid,
+            task_tracker=task_tracker,
+        ),
     )
-    # session.on(
-    #     "user_input_transcribed",
-    #     partial(on_user_input_transcribed, output_language=output_language)
-    # )
     session.on(
         "close",
-        partial(on_close, stream_sid=stream_sid, userdata=user_data),
+        partial(
+            on_close,
+            stream_sid=stream_sid,
+            userdata=user_data,
+            task_tracker=task_tracker,
+        ),
     )
     session.on(
         "function_tools_executed",
-        partial(on_function_tools_executed, userdata=user_data),
+        partial(on_function_tools_executed, userdata=user_data, stream_sid=stream_sid),
     )
     session.on(
         "error",
-        partial(on_error, stream_sid=stream_sid),
+        partial(on_error, stream_sid=stream_sid, userdata=user_data),
     )
+
+    return task_tracker
