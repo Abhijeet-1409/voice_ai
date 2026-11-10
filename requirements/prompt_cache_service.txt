@@ -9,7 +9,7 @@ uvicorn[standard]==0.54.0
 
 # Background jobs / Redis broker
 celery[redis]==5.7.0
-redis==6.4.0
+redis>=6.1.0,<7.0.0
 
 # Async PostgreSQL access
 sqlalchemy==2.0.36
