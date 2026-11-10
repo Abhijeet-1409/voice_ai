@@ -25,7 +25,7 @@ from livekit import api
 # File location in the repository:
 # app/services/worker/tests/integration/test_livekit_outbound_dispatch.py
 # app/data/outbound_call_test.json
-APP_ROOT = Path(__file__).resolve().parents[3]
+APP_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = APP_ROOT / "data" / "outbound_call_test.json"
 ROOM_PREFIX = "worker-playground-outbound"
 
