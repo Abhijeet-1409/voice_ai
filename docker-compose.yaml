@@ -89,6 +89,11 @@ services:
     env_file:
       - .env
 
+    # Use the Compose service hostname from inside the migration container.
+    # The host-side DATABASE_URL in .env may use localhost.
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-voice_ai}"
+
     depends_on:
       postgres:
         condition: service_healthy
@@ -127,6 +132,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
 
     command:
       ["python", "-m", "rag.ingest"]
@@ -149,6 +156,7 @@ services:
     environment:
       AGENT_MODE: ${AGENT_MODE:-dev}
       GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/application_default_credentials.json
+      PROMPT_CACHE_BASE_URL: http://prompt_cache_api:8000
 
     env_file:
       - .env
@@ -162,8 +170,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-
       redis:
+        condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+      prompt_cache_api:
         condition: service_healthy
 
     command:
@@ -202,6 +213,21 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
+
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import socket; socket.create_connection(('127.0.0.1', 8000), timeout=2).close()"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
 
     command:
       ["uvicorn", "app.services.prompt_cache_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
@@ -238,6 +264,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
 
     command:
       [
@@ -277,6 +305,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
 
     command:
       [
@@ -313,6 +343,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrations:
+        condition: service_completed_successfully
 
     command:
       [
