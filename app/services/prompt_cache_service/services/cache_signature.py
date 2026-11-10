@@ -4,7 +4,7 @@ import hashlib
 import json
 from typing import Any
 
-from schemas.cache import CachePayload
+from ..schemas.cache import CachePayload
 
 
 def build_signature_payload(payload: CachePayload) -> dict[str, Any]:
