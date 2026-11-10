@@ -1,0 +1,28 @@
+# Prompt Cache Service — Runtime Requirements
+#
+# API + Celery worker + Celery Beat + transactional outbox publisher.
+# Database schema migrations are run by the separate migrations image.
+
+# FastAPI API server
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+
+# Background jobs / Redis broker
+celery[redis]==5.7.0
+redis==6.4.0
+
+# Async PostgreSQL access
+sqlalchemy==2.0.36
+asyncpg==0.30.0
+pgvector==0.5.0
+
+# Configuration / validation
+pydantic==2.13.0
+pydantic-settings==2.14.2
+
+# Gemini provider
+# Confirm this matches the import in gemini_cache_provider.py.
+google-genai==2.23.0
+
+# Environment loading
+python-dotenv==1.0.1
