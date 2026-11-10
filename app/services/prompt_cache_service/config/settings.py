@@ -1,3 +1,4 @@
+
 """Prompt Cache Service settings.
 
 This class extends the application's shared settings and adds only the
@@ -51,8 +52,12 @@ class PromptCacheSettings(AppBaseSettings):
     GEMINI_MODEL: str
     CACHED_CONTENT_TTL: int = Field(gt=0)
 
-    # Path to the same service-account JSON file used by the LiveKit worker.
-    GOOGLE_APPLICATION_CREDENTIALS: str = Field(min_length=1)
+    # Path to the service-account JSON file.
+    # Optional because not every service process initializes Gemini.
+    GOOGLE_APPLICATION_CREDENTIALS: str | None = Field(
+        default=None,
+        min_length=1,
+    )
 
     @model_validator(mode="after")
     def validate_prompt_cache_settings(self) -> "PromptCacheSettings":
