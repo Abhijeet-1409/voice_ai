@@ -28,7 +28,7 @@ pgvector==0.5.0
 # Redis
 # Required temporarily because shared/infra/__init__.py
 # eagerly imports shared.infra.redis.
-redis==5.2.1
+redis>=6.1.0,<7.0.0
 
 # Local environment loading
 python-dotenv==1.0.1

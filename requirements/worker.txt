@@ -21,7 +21,7 @@ livekit-plugins-noise-cancellation~=0.2
 livekit-agents[cartesia,sarvam,silero]~=1.8
 
 # Redis
-redis==5.2.1
+redis>=6.1.0,<7.0.0
 
 # RAG runtime
 sentence-transformers==3.0.1
