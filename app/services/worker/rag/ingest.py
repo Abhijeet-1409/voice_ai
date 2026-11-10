@@ -18,7 +18,7 @@ async def run_ingestion() -> None:
     (content, vector) pair into Postgres via PgVectorStore.insert.
     Run once, standalone — not on worker startup.
     """
-    await init_db_async  # Ensure the database engine is initialized before proceeding
+    await init_db_async()  # Ensure the database engine is initialized before proceeding
     store = get_pgvectorstore()
     model = get_embedding_model()
 
