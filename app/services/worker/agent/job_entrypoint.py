@@ -69,8 +69,79 @@ async def entrypoint(ctx: JobContext) -> None:
         # until the room connection is established
         await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
-        # extract call metadata
-        metadata: dict = json.loads(ctx.room.metadata or "{}")
+        # Extract metadata from all three sources used by the outbound test:
+        # 1. Room metadata: small routing/call fields.
+        # 2. SIP participant metadata: participant-level copy of the call data.
+        # 3. Agent-dispatch metadata: full prospect/campaign payload.
+        #
+        # The test puts the full call_metadata JSON in BOTH
+        # CreateAgentDispatchRequest.metadata and
+        # CreateSIPParticipantRequest.participant_metadata. Dispatch metadata
+        # is the primary source because the agent job can start before the SIP
+        # participant has joined the room. Participant metadata is extracted
+        # when the SIP participant is already present, and acts as a fallback.
+        room_metadata: dict = json.loads(ctx.room.metadata or "{}")
+
+        raw_dispatch_metadata = getattr(ctx.job, "metadata", None)
+        if isinstance(raw_dispatch_metadata, str) and raw_dispatch_metadata:
+            dispatch_metadata = json.loads(raw_dispatch_metadata)
+        elif isinstance(raw_dispatch_metadata, dict):
+            dispatch_metadata = raw_dispatch_metadata
+        else:
+            dispatch_metadata = {}
+
+        if not isinstance(room_metadata, dict):
+            raise ValueError("LiveKit room metadata must be a JSON object.")
+        if not isinstance(dispatch_metadata, dict):
+            raise ValueError("LiveKit job metadata must be a JSON object.")
+
+        # The SIP participant may not have joined yet. Do not wait for it:
+        # the outbound test also includes the complete profile in
+        # ctx.job.metadata, so startup does not depend on participant timing.
+        sip_participant = next(
+            (
+                participant
+                for participant in ctx.room.remote_participants.values()
+                if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+            ),
+            None,
+        )
+
+        participant_metadata: dict = {}
+        raw_participant_metadata = (
+            getattr(sip_participant, "metadata", None)
+            if sip_participant is not None
+            else None
+        )
+        if isinstance(raw_participant_metadata, str) and raw_participant_metadata:
+            try:
+                parsed_participant_metadata = json.loads(raw_participant_metadata)
+                if isinstance(parsed_participant_metadata, dict):
+                    participant_metadata = parsed_participant_metadata
+                else:
+                    logger.warning(
+                        "Ignoring SIP participant metadata because it is not a JSON object."
+                    )
+            except json.JSONDecodeError:
+                # Participant metadata is a secondary copy. A malformed or
+                # unavailable copy must not block an outbound call whose
+                # dispatch metadata is valid.
+                logger.warning(
+                    "Ignoring malformed SIP participant metadata.",
+                    exc_info=True,
+                )
+        elif isinstance(raw_participant_metadata, dict):
+            participant_metadata = raw_participant_metadata
+
+        # Source precedence: room < participant < dispatch. The dispatch copy
+        # wins because the test intentionally attaches the complete profile
+        # there, and it is available when the agent job starts.
+        metadata: dict = {
+            **room_metadata,
+            **participant_metadata,
+            **dispatch_metadata,
+        }
+
         stream_sid: str = ctx.room.name
         channel: Channel = Channel(metadata.get("channel", Channel.PHONE))
         call_type: CallType = CallType(metadata.get("call_type", CallType.INBOUND))
@@ -79,25 +150,21 @@ async def entrypoint(ctx: JobContext) -> None:
         # subsequent log line in this call (including from key selection)
         # carries the right stream_sid
         stream_sid_var.set(stream_sid)
-        logger.debug(f"Room metadata: {metadata}")
+        logger.debug(
+            "Call metadata loaded: channel=%s call_type=%s has_prospect=%s "
+            "has_participant_metadata=%s",
+            channel.value,
+            call_type.value,
+            isinstance(metadata.get("prospect"), dict),
+            bool(participant_metadata),
+        )
 
-        # look up the caller by phone — pure lookup, never creates
+        # Look up an existing contact by phone — this is a read-only lookup.
+        # Prefer the call metadata's E.164 number, then use the SIP participant
+        # attribute as a fallback if the participant was already present.
         phone = metadata.get("phone")
-
-        if not phone:
-            participants = ctx.room.remote_participants.values()
-
-            sip_participant = next(
-                (
-                    participant
-                    for participant in participants
-                    if participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
-                ),
-                None,
-            )
-
-            if sip_participant:
-                phone = (sip_participant.attributes or {}).get("sip.phoneNumber")
+        if not phone and sip_participant is not None:
+            phone = (sip_participant.attributes or {}).get("sip.phoneNumber")
 
         contact = await lookup_customer(phone) if phone else None
 
@@ -161,6 +228,33 @@ async def entrypoint(ctx: JobContext) -> None:
                 f"{user_context_block}"
             ),
         )
+
+        # For outbound outreach, attach the complete prospect and campaign
+        # payload supplied through agent-dispatch metadata. This is a separate
+        # system message so the agent can distinguish prospect/referral data
+        # from the generic UserData context above.
+        if call_type == CallType.OUTREACH:
+            prospect_context = {
+                "campaign": metadata.get("campaign") or {},
+                "prospect": metadata.get("prospect") or {},
+            }
+            chat_ctx.add_message(
+                role="system",
+                content=(
+                    "Potential Client Information for Outbound Call\n\n"
+                    "The following structured information was supplied with "
+                    "this outbound call for the potential client and the "
+                    "related referral/campaign. Treat it as background context, "
+                    "not as information confirmed by the prospect.\n"
+                    "Do not assume the prospect currently uses AWS, is already "
+                    "our customer, requested this call, or knows about the "
+                    "referral unless the supplied information explicitly "
+                    "confirms it. Treat null, unknown, and empty values as "
+                    "information that is not available; do not guess. Verify "
+                    "important details naturally during the conversation.\n\n"
+                    f"{json.dumps(prospect_context, ensure_ascii=False, indent=2)}"
+                ),
+            )
 
         # create llm client for agent task since the current supervisor agent llm does not include the task tools
         task_llm = livekit_google_plugin.LLM(
