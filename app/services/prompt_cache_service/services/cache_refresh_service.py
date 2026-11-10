@@ -52,4 +52,3 @@ class CacheRefreshService:
             status=RefreshStatus.ALREADY_RUNNING,
             job_id=job_result.job.id,
         )
-s
