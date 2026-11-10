@@ -147,8 +147,8 @@ services:
     restart: unless-stopped
 
     environment:
-      - AGENT_MODE=${AGENT_MODE:-dev}
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials/application_default_credentials.json
+      AGENT_MODE: ${AGENT_MODE:-dev}
+      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/application_default_credentials.json
 
     env_file:
       - .env
@@ -166,7 +166,163 @@ services:
       redis:
         condition: service_healthy
 
-    command: ["sh", "-c", "python -m livekit.agents download-files && python agent_runner.py $AGENT_MODE"]
+    command:
+      ["sh", "-c", "python -m livekit.agents download-files && python agent_runner.py $AGENT_MODE"]
+
+
+  # ─────────────────────────────────────────────
+  # Shared Prompt Cache Service runtime configuration
+  #
+  # All Prompt Cache processes use the same image but run as
+  # separate containers and separate supervised processes.
+  # ─────────────────────────────────────────────
+
+  prompt_cache_api:
+    image: voice_ai_prompt_cache_service:latest
+
+    build:
+      context: .
+      dockerfile: docker/prompt_cache_service.Dockerfile
+
+    container_name: voice_ai_prompt_cache_api
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-voice_ai}"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0"
+
+    ports:
+      - "8000:8000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    command:
+      ["uvicorn", "app.services.prompt_cache_service.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+
+  # ─────────────────────────────────────────────
+  # Prompt Cache Celery worker
+  # Consumes cache-creation jobs from Redis/Celery.
+  # Gemini ADC credentials are only mounted into this process.
+  # ─────────────────────────────────────────────
+  prompt_cache_worker:
+    image: voice_ai_prompt_cache_service:latest
+
+    build:
+      context: .
+      dockerfile: docker/prompt_cache_service.Dockerfile
+
+    container_name: voice_ai_prompt_cache_worker
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-voice_ai}"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0"
+      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/application_default_credentials.json
+
+    volumes:
+      - ${APPDATA}/gcloud/application_default_credentials.json:/app/credentials/application_default_credentials.json:ro
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    command:
+      [
+        "celery",
+        "-A",
+        "app.services.prompt_cache_service.workers.celery_app:celery_app",
+        "worker",
+        "--pool=prefork",
+        "--loglevel=INFO",
+        "--queues=prompt-cache"
+      ]
+
+
+  # ─────────────────────────────────────────────
+  # Prompt Cache transactional outbox publisher
+  # Polls PostgreSQL and publishes job IDs to Celery.
+  # ─────────────────────────────────────────────
+  prompt_cache_outbox_publisher:
+    image: voice_ai_prompt_cache_service:latest
+
+    build:
+      context: .
+      dockerfile: docker/prompt_cache_service.Dockerfile
+
+    container_name: voice_ai_prompt_cache_outbox_publisher
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-voice_ai}"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    command:
+      [
+        "python",
+        "-c",
+        "from app.services.prompt_cache_service.workers.outbox_publisher import main; main()"
+      ]
+
+
+  # ─────────────────────────────────────────────
+  # Prompt Cache recovery scheduler (Celery Beat)
+  # Schedules prompt_cache.recover_jobs at
+  # RECOVERY_INTERVAL_SECONDS from PromptCacheSettings.
+  # ─────────────────────────────────────────────
+  prompt_cache_recovery:
+    image: voice_ai_prompt_cache_service:latest
+
+    build:
+      context: .
+      dockerfile: docker/prompt_cache_service.Dockerfile
+
+    container_name: voice_ai_prompt_cache_recovery
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-voice_ai}"
+      REDIS_URL: "redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    command:
+      [
+        "celery",
+        "-A",
+        "prompt_cache_beat:celery_app",
+        "beat",
+        "--loglevel=INFO",
+        "--schedule=/tmp/prompt-cache-celerybeat-schedule"
+      ]
 
 
 volumes:
