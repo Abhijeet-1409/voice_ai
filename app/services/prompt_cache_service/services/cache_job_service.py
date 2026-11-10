@@ -374,4 +374,3 @@ class CacheJobService:
             http_status=500,
             retryable=False,
         )
-s
