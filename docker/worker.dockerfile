@@ -25,6 +25,9 @@ RUN groupadd -r appgroup \
 
 WORKDIR /app
 
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+
 
 # ─────────────────────────────────────────────
 # HuggingFace / SentenceTransformer cache
@@ -42,6 +45,14 @@ ENV SENTENCE_TRANSFORMERS_HOME=/app/rag_models
 
 COPY app/packages/shared /app/packages/shared
 RUN pip install --no-cache-dir --default-timeout=120 --retries=10 /app/packages/shared
+
+
+# ─────────────────────────────────────────────
+# Install the repository-local Prompt Cache Client
+# ─────────────────────────────────────────────
+
+COPY app/packages/prompt_cache_client /app/packages/prompt_cache_client
+RUN pip install --no-cache-dir --default-timeout=120 --retries=10 /app/packages/prompt_cache_client
 
 
 # ─────────────────────────────────────────────
