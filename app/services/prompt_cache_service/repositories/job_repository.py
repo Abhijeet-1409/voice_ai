@@ -489,7 +489,10 @@ class JobRepository:
                 PromptCacheLock.lease_expires_at.is_not(None),
                 (
                     PromptCacheLock.lease_expires_at
-                    + func.make_interval(secs=grace_seconds)
+                    + func.make_interval(
+                        0, 0, 0, 0, 0, 0,
+                        settings.CACHE_JOB_TIMEOUT_SECONDS,
+                    )
                 )
                 <= func.clock_timestamp(),
             )
