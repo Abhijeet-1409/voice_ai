@@ -231,10 +231,12 @@ async def recover_jobs_async() -> dict[str, int]:
 
     job_repository = JobRepository()
     lock_repository = LockRepository()
+    cache_repository = CacheRepository()
 
     recovery_service = JobRecoveryService(
         job_repository=job_repository,
         lock_repository=lock_repository,
+        cache_repository=cache_repository,
         settings=runtime.settings,
     )
 
