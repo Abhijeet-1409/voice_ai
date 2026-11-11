@@ -334,17 +334,27 @@ class JobRepository:
         job_id: UUID,
         status: JobStatus,
         error: CacheJobError | None,
-    ) -> None:
+    ) -> bool:
         """Mark a job COMPLETED or FAILED exactly once.
 
-        The job row is locked before checking its latest status.
+        Locks the job row before checking its latest status.
+
+        Returns:
+            True: The terminal details were successfully persisted.
+            False: The job was already in a terminal state.
+
         The caller must append the corresponding terminal history record
-        in this same transaction.
+        only when this method returns True, within the same transaction.
         """
 
         if status not in (JobStatus.COMPLETED, JobStatus.FAILED):
             raise ValueError(
                 "mark_terminal only accepts COMPLETED or FAILED."
+            )
+
+        if status == JobStatus.FAILED and error is None:
+            raise ValueError(
+                "A FAILED job must have structured error details."
             )
 
         job = await self.get_job(
@@ -383,7 +393,7 @@ class JobRepository:
                 current_status.value,
                 status.value,
             )
-            return
+            return False
 
         stmt = (
             update(PromptCacheJob)
@@ -401,6 +411,8 @@ class JobRepository:
             raise LookupError(
                 f"Prompt Cache job not found while marking terminal: {job_id}"
             )
+
+        return True
 
     async def list_overdue_active_jobs(
         self,

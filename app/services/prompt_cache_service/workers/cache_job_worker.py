@@ -586,18 +586,19 @@ class CacheJobWorker:
                     or self._to_job_error(classified_error)
                 )
 
-                await self.job_repository.append_status(
-                    session,
-                    job_id=job_id,
-                    status=JobStatus.FAILED,
-                )
-
-                await self.job_repository.mark_terminal(
+                finalized = await self.job_repository.mark_terminal(
                     session,
                     job_id=job_id,
                     status=JobStatus.FAILED,
                     error=terminal_error,
                 )
+
+                if finalized:
+                    await self.job_repository.append_status(
+                        session,
+                        job_id=job_id,
+                        status=JobStatus.FAILED,
+                    )
 
                 released = await self.lock_repository.release(
                     session,
