@@ -194,9 +194,6 @@ class JobRecoveryService:
                 await self.job_repository.list_crashed_running_jobs(
                     session,
                     limit=self.settings.RECOVERY_BATCH_SIZE,
-                    crash_grace_seconds=(
-                        self.settings.WORKER_CRASH_GRACE_SECONDS
-                    ),
                 )
             )
 
