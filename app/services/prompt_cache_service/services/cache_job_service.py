@@ -101,7 +101,8 @@ class CacheJobService:
             select(
                 func.clock_timestamp()
                 + func.make_interval(
-                    secs=self.settings.CACHE_JOB_TIMEOUT_SECONDS
+                    0, 0, 0, 0, 0, 0,
+                    self.settings.CACHE_JOB_TIMEOUT_SECONDS,
                 )
             )
         )
