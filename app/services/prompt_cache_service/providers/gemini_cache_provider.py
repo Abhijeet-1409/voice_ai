@@ -56,22 +56,12 @@ class GeminiCacheProvider:
         self._closed = False
 
     def _create_client(self) -> genai.Client:
-        """Initialize the Google Gen AI client using service credentials."""
-
-        credentials = (
-            service_account.Credentials.from_service_account_file(
-                self.settings.GOOGLE_APPLICATION_CREDENTIALS,
-                scopes=[
-                    "https://www.googleapis.com/auth/cloud-platform"
-                ],
-            )
-        )
+        """Initialize the Google Gen AI client using Application Default Credentials."""
 
         return genai.Client(
             enterprise=True,
             project=self.settings.PROJECT,
             location=self.settings.LOCATION,
-            credentials=credentials,
         )
 
     def _get_async_client(self) -> Any:
