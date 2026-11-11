@@ -44,7 +44,7 @@ async def create_cache_job(
     )
 
     return CacheJobSubmissionResponse(
-        id=job_result.job.id,
+        id=str(job_result.job.id),
         status=job_result.status,
         created=job_result.created,
     )
